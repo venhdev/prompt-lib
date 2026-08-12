@@ -32,4 +32,4 @@ The project is configured for Vercel using `vercel.json`.
 
 ## Database
 
-Apply the SQL migrations in `supabase/migrations` to a Supabase project in filename order.
+Run `supabase/schema.sql` once on a fresh Supabase project.

@@ -1,4 +1,4 @@
-create table if not exists public.profiles (
+create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   username text not null,
   created_at timestamptz not null default now(),
@@ -7,10 +7,10 @@ create table if not exists public.profiles (
   constraint profiles_username_format check (username ~ '^[A-Za-z0-9_]+$')
 );
 
-create unique index if not exists profiles_username_lower_key
+create unique index profiles_username_lower_key
   on public.profiles (lower(username));
 
-create table if not exists public.prompts (
+create table public.prompts (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null references auth.users(id) on delete cascade,
   title text not null,
@@ -21,10 +21,10 @@ create table if not exists public.prompts (
   updated_at timestamptz not null default now()
 );
 
-create index if not exists prompts_owner_updated_idx
+create index prompts_owner_updated_idx
   on public.prompts (owner_id, updated_at desc);
 
-create table if not exists public.prompt_versions (
+create table public.prompt_versions (
   id uuid primary key default gen_random_uuid(),
   prompt_id uuid not null references public.prompts(id) on delete cascade,
   name text not null,
@@ -37,7 +37,7 @@ create table if not exists public.prompt_versions (
   unique (prompt_id, position)
 );
 
-create index if not exists prompt_versions_prompt_position_idx
+create index prompt_versions_prompt_position_idx
   on public.prompt_versions (prompt_id, position);
 
 alter table public.profiles enable row level security;
@@ -101,7 +101,7 @@ grant select, insert, update, delete on public.prompts to authenticated;
 grant select, insert, update, delete on public.prompt_versions to authenticated;
 revoke all on public.profiles, public.prompts, public.prompt_versions from anon;
 
-create or replace function public.handle_new_user()
+create function public.handle_new_user()
 returns trigger
 language plpgsql
 security definer set search_path = ''
@@ -119,17 +119,8 @@ begin
 end;
 $$;
 
-drop trigger if exists on_auth_user_created on auth.users;
+revoke all on function public.handle_new_user() from public, anon, authenticated;
+
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
-
-insert into public.profiles (id, username)
-select
-  users.id,
-  coalesce(
-    nullif(users.raw_user_meta_data ->> 'username', ''),
-    'user_' || substr(replace(users.id::text, '-', ''), 1, 12)
-  )
-from auth.users as users
-on conflict (id) do nothing;
