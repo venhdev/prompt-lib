@@ -1,9 +1,26 @@
 import { build } from "esbuild";
+import { existsSync } from "node:fs";
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { loadEnvFile } from "node:process";
 
 const root = process.cwd();
 const outputDir = path.join(root, "dist");
+
+const localEnvFile = path.join(root, ".env.local");
+if (existsSync(localEnvFile)) loadEnvFile(localEnvFile);
+
+const requiredEnvironment = [
+  "NEXT_PUBLIC_SUPABASE_URL",
+  "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+];
+const missingEnvironment = requiredEnvironment.filter((key) => !process.env[key]);
+if (missingEnvironment.length) {
+  throw new Error(`Missing build environment: ${missingEnvironment.join(", ")}`);
+}
+
+const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") || "";
+if (configuredAppUrl) new URL(configuredAppUrl);
 
 await rm(outputDir, { recursive: true, force: true });
 
@@ -19,6 +36,11 @@ const result = await build({
   loader: {
     ".js": "jsx",
     ".css": "css",
+  },
+  define: {
+    __SUPABASE_URL__: JSON.stringify(process.env.NEXT_PUBLIC_SUPABASE_URL),
+    __SUPABASE_PUBLISHABLE_KEY__: JSON.stringify(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY),
+    __APP_URL__: JSON.stringify(configuredAppUrl),
   },
 });
 

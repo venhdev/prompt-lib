@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../lib/supabase";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { getAppUrl, supabase } from "../lib/supabase";
 import packageJson from "../package.json";
 import {
   ArrowClockwise,
@@ -26,74 +26,13 @@ import {
   UploadSimple,
 } from "@phosphor-icons/react";
 
-const seedPrompts = [
-  {
-    id: "optimizer",
-    title: "Prompt Optimizer",
-    description: "Refine rough requests without changing their intent.",
-    tags: ["Writing", "System"],
-    updated: "2 phút trước",
-    versions: [
-      {
-        id: "opt-v1",
-        name: "v1 — Baseline",
-        note: "Initial concise optimizer",
-        created: "09:14",
-        content: "You are a Prompt Optimizer. Improve the user's input only when it meaningfully increases clarity. Preserve the original intent and requirements exactly. Return the shortest, clearest version in clean Markdown.",
-      },
-      {
-        id: "opt-v2",
-        name: "v2 — Guardrails",
-        note: "Added scope and output constraints",
-        created: "09:42",
-        content: "You are a Prompt Optimizer. Improve the user's input only when it meaningfully increases clarity.\n\nRules:\n- Preserve the original intent and requirements exactly.\n- Do not expand the scope.\n- Remove redundancy and irrelevant noise.\n- Keep technical context needed to diagnose the task.\n\nReturn only the optimized prompt in clean Markdown.",
-      },
-      {
-        id: "opt-v3",
-        name: "v3 — Current",
-        note: "Added quality gate and stricter format",
-        created: "10:08",
-        content: "You are a Prompt Optimizer. Improve the user's input only when it meaningfully increases clarity.\n\nRules:\n- Preserve intent, requirements, and scope exactly.\n- Improve grammar, structure, brevity, and signal-to-noise ratio.\n- Remove unrelated output, but retain errors and evidence useful for diagnosis.\n- Write in English using clean Markdown.\n\nIf quality is already at least 90%, return only: `Quality: X%, Your prompt is already clear.` Otherwise, return a score, one short reason, and the optimized prompt.",
-      },
-    ],
-  },
-  {
-    id: "explainer",
-    title: "Technical Explainer",
-    description: "Explain engineering concepts in concise Vietnamese.",
-    tags: ["Education"],
-    updated: "Hôm qua",
-    versions: [
-      { id: "ex-v1", name: "v1 — Current", note: "Concise bilingual style", created: "Hôm qua", content: "Explain technical concepts concisely in Vietnamese while preserving relevant English keywords. Start with a plain-language definition, then give one practical example and the key trade-off." },
-    ],
-  },
-  {
-    id: "reviewer",
-    title: "Code Reviewer",
-    description: "Find correctness and maintainability risks first.",
-    tags: ["Development"],
-    updated: "3 ngày trước",
-    versions: [
-      { id: "rev-v1", name: "v1 — Current", note: "Risk-first review", created: "3 ngày trước", content: "Review the code for correctness, security, and maintainability. Lead with concrete findings ordered by severity. Cite the affected file and line. Avoid style-only comments unless they hide a real risk." },
-    ],
-  },
-];
-
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
-const OWNER_EMAIL = "venhha.it@gmail.com";
 const APP_VERSION = packageJson.version;
+const RECOVERY_INTENT_KEY = "prompt-lib:password-recovery";
 
 function newId() {
   return crypto.randomUUID();
-}
-
-function freshPrompts() {
-  return clone(seedPrompts).map((prompt) => ({
-    ...prompt,
-    id: newId(),
-    versions: prompt.versions.map((version) => ({ ...version, id: newId() })),
-  }));
 }
 
 function normalizePrompts(items) {
@@ -108,27 +47,47 @@ function normalizePrompts(items) {
 }
 
 export default function PromptLibrary() {
-  const [prompts, setPrompts] = useState(seedPrompts);
-  const [activeId, setActiveId] = useState("optimizer");
+  const [prompts, setPrompts] = useState([]);
+  const [activeId, setActiveId] = useState(null);
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState("editor");
-  const [compareA, setCompareA] = useState("opt-v2");
-  const [compareB, setCompareB] = useState("opt-v3");
+  const [compareA, setCompareA] = useState(null);
+  const [compareB, setCompareB] = useState(null);
   const [notice, setNotice] = useState("Đã tự động lưu");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [cloudReady, setCloudReady] = useState(false);
+  const [cloudError, setCloudError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [loadedUserId, setLoadedUserId] = useState(null);
   const [loginNotice, setLoginNotice] = useState("");
-  const [authMode, setAuthMode] = useState("login");
+  const [authMode, setAuthMode] = useState(() => typeof window !== "undefined" && localStorage.getItem(RECOVERY_INTENT_KEY) === "true" ? "reset" : "login");
+  const [pendingEmail, setPendingEmail] = useState("");
+  const [recoveryMode, setRecoveryMode] = useState(() => typeof window !== "undefined" && localStorage.getItem(RECOVERY_INTENT_KEY) === "true");
   const [authForm, setAuthForm] = useState({ username: "", email: "", password: "", otp: "", newPassword: "" });
+  const activeUserIdRef = useRef(null);
+  const syncQueueRef = useRef(Promise.resolve());
+
+  const emailVerified = Boolean(session?.user?.email_confirmed_at);
+
+  useEffect(() => {
+    activeUserIdRef.current = session?.user?.id || null;
+  }, [session?.user?.id]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
+      activeUserIdRef.current = data.session?.user?.id || null;
       setSession(data.session);
       setAuthReady(true);
     });
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      activeUserIdRef.current = nextSession?.user?.id || null;
+      if (event === "PASSWORD_RECOVERY") {
+        localStorage.setItem(RECOVERY_INTENT_KEY, "true");
+        setRecoveryMode(true);
+        setAuthMode("reset");
+      }
       setSession(nextSession);
       setAuthReady(true);
     });
@@ -136,8 +95,12 @@ export default function PromptLibrary() {
   }, []);
 
   useEffect(() => {
-    if (!session?.user) {
-      setCloudReady(false);
+    setCloudReady(false);
+    setCloudError("");
+    setLoadedUserId(null);
+    setPrompts([]);
+    setActiveId(null);
+    if (!session?.user || !emailVerified || recoveryMode) {
       return;
     }
     let cancelled = false;
@@ -150,6 +113,8 @@ export default function PromptLibrary() {
       if (cancelled) return;
       if (error) {
         setNotice("Không thể tải cloud");
+        setCloudError(error.message);
+        setLoadedUserId(session.user.id);
         return;
       }
       if (data?.length) {
@@ -166,41 +131,31 @@ export default function PromptLibrary() {
         setPrompts(cloudPrompts);
         setActiveId(cloudPrompts[0].id);
       } else {
-        const userKey = `prompt-lib-data:${session.user.id}`;
-        const legacy = session.user.email === OWNER_EMAIL
-          ? localStorage.getItem("prompt-lib-data") || localStorage.getItem("prompt-lab-data")
-          : null;
-        let initial;
-        try { initial = legacy ? normalizePrompts(JSON.parse(legacy)) : freshPrompts(); } catch { initial = freshPrompts(); }
-        initial = initial.map((prompt) => ({ ...prompt, id: newId(), versions: prompt.versions.map((version) => ({ ...version, id: newId() })) }));
-        localStorage.setItem(userKey, JSON.stringify(initial));
-        setPrompts(initial);
-        setActiveId(initial[0].id);
+        setPrompts([]);
+        setActiveId(null);
       }
+      setLoadedUserId(session.user.id);
       setCloudReady(true);
       setNotice("Đã đồng bộ cloud");
     }
     loadCloudLibrary();
     return () => { cancelled = true; };
-  }, [session?.user?.id]);
+  }, [session?.user?.id, emailVerified, recoveryMode, loadAttempt]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (!session?.user) return;
-      localStorage.setItem(`prompt-lib-data:${session.user.id}`, JSON.stringify(prompts));
-      if (!cloudReady || !session?.user) {
-        setNotice("Đã lưu cục bộ");
-        return;
-      }
-      const promptRows = prompts.map((prompt) => ({
+      if (!cloudReady || !session?.user || !emailVerified || recoveryMode || loadedUserId !== session.user.id) return;
+      const userId = session.user.id;
+      const snapshot = clone(prompts);
+      const promptRows = snapshot.map((prompt) => ({
         id: prompt.id,
-        owner_id: session.user.id,
+        owner_id: userId,
         title: prompt.title,
         description: prompt.description,
         tags: prompt.tags,
         updated_label: prompt.updated,
       }));
-      const versionRows = prompts.flatMap((prompt) => prompt.versions.map((version, position) => ({
+      const versionRows = snapshot.flatMap((prompt) => prompt.versions.map((version, position) => ({
         id: version.id,
         prompt_id: prompt.id,
         name: version.name,
@@ -209,64 +164,127 @@ export default function PromptLibrary() {
         content: version.content,
         position,
       })));
-      supabase.from("prompts").upsert(promptRows).then(async ({ error: promptError }) => {
-        const { error: versionError } = promptError
-          ? { error: null }
-          : await supabase.from("prompt_versions").upsert(versionRows);
-        const error = promptError || versionError;
-        if (!error) {
-          const { data: remotePrompts } = await supabase.from("prompts").select("id");
-          const stalePromptIds = (remotePrompts || []).map((row) => row.id).filter((id) => !prompts.some((prompt) => prompt.id === id));
-          if (stalePromptIds.length) await supabase.from("prompts").delete().in("id", stalePromptIds);
+      syncQueueRef.current = syncQueueRef.current.then(async () => {
+        if (activeUserIdRef.current !== userId) return;
+        const { error: promptError } = promptRows.length
+          ? await supabase.from("prompts").upsert(promptRows)
+          : { error: null };
+        const { error: versionError } = !promptError && versionRows.length
+          ? await supabase.from("prompt_versions").upsert(versionRows)
+          : { error: null };
+        let error = promptError || versionError;
+        if (!error && activeUserIdRef.current === userId) {
+          const { data: remotePrompts, error: listError } = await supabase.from("prompts").select("id");
+          error = listError;
+          const stalePromptIds = (remotePrompts || []).map((row) => row.id).filter((id) => !snapshot.some((prompt) => prompt.id === id));
+          if (!error && stalePromptIds.length) {
+            const { error: deleteError } = await supabase.from("prompts").delete().in("id", stalePromptIds);
+            error = deleteError;
+          }
         }
-        setNotice(error ? "Lỗi đồng bộ cloud" : "Đã đồng bộ cloud");
+        if (activeUserIdRef.current === userId) setNotice(error ? "Lỗi đồng bộ cloud" : "Đã đồng bộ cloud");
       });
     }, 350);
     return () => clearTimeout(timer);
-  }, [prompts, cloudReady, session?.user?.id]);
+  }, [prompts, cloudReady, loadedUserId, session?.user?.id, emailVerified, recoveryMode]);
 
   function updateAuthField(field, value) {
     setAuthForm((currentForm) => ({ ...currentForm, [field]: value }));
+  }
+
+  async function returnToLogin() {
+    localStorage.removeItem(RECOVERY_INTENT_KEY);
+    setRecoveryMode(false);
+    setAuthMode("login");
+    setLoginNotice("");
+    if (session) await supabase.auth.signOut();
+  }
+
+  async function resendVerification() {
+    const email = pendingEmail || authForm.email.trim();
+    if (!email) return;
+    setLoginNotice("Đang gửi lại email…");
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email,
+      options: { emailRedirectTo: getAppUrl() },
+    });
+    setLoginNotice(error ? error.message : "Đã gửi lại email xác minh.");
   }
 
   async function submitAuth(event) {
     event.preventDefault();
     setLoginNotice("Đang xử lý…");
     if (authMode === "register") {
-      const { error } = await supabase.auth.signUp({
-        email: authForm.email.trim(),
+      const email = authForm.email.trim();
+      const username = authForm.username.trim();
+      if (!/^[A-Za-z0-9_]{3,32}$/.test(username)) {
+        setLoginNotice("Username chỉ gồm chữ, số, dấu gạch dưới và dài 3–32 ký tự.");
+        return;
+      }
+      const { data, error } = await supabase.auth.signUp({
+        email,
         password: authForm.password,
-        options: { data: { username: authForm.username.trim() }, emailRedirectTo: window.location.origin },
+        options: { data: { username }, emailRedirectTo: getAppUrl() },
       });
-      setLoginNotice(error ? error.message : "Đăng ký thành công. Hãy xác nhận email nếu được yêu cầu.");
+      if (error) {
+        setLoginNotice(error.message);
+        return;
+      }
+      if (!data.session || !data.user?.email_confirmed_at) {
+        setPendingEmail(email);
+        setAuthMode("verify-email");
+        setLoginNotice("Tài khoản đã được tạo. Hãy xác minh email để tiếp tục.");
+      }
       return;
     }
     if (authMode === "forgot") {
+      const email = authForm.email.trim();
       const { error } = await supabase.auth.signInWithOtp({
-        email: authForm.email.trim(),
-        options: { shouldCreateUser: false },
+        email,
+        options: { shouldCreateUser: false, emailRedirectTo: getAppUrl() },
       });
       if (!error) setAuthMode("verify");
       setLoginNotice(error ? error.message : "Mã OTP đã được gửi đến email của bạn.");
       return;
     }
     if (authMode === "verify") {
+      setRecoveryMode(true);
       const { error } = await supabase.auth.verifyOtp({ email: authForm.email.trim(), token: authForm.otp.trim(), type: "email" });
-      if (!error) setAuthMode("reset");
+      if (!error) {
+        localStorage.setItem(RECOVERY_INTENT_KEY, "true");
+        setAuthMode("reset");
+      } else {
+        setRecoveryMode(false);
+      }
       setLoginNotice(error ? error.message : "OTP hợp lệ. Hãy đặt mật khẩu mới.");
       return;
     }
     if (authMode === "reset") {
       const { error } = await supabase.auth.updateUser({ password: authForm.newPassword });
-      setLoginNotice(error ? error.message : "Đã cập nhật mật khẩu.");
+      if (error) {
+        setLoginNotice(error.message);
+        return;
+      }
+      localStorage.removeItem(RECOVERY_INTENT_KEY);
+      setRecoveryMode(false);
+      setAuthMode("login");
+      setNotice("Đã cập nhật mật khẩu");
       return;
     }
-    const { error } = await supabase.auth.signInWithPassword({ email: authForm.email.trim(), password: authForm.password });
+    const email = authForm.email.trim();
+    const { error } = await supabase.auth.signInWithPassword({ email, password: authForm.password });
+    if (error?.code === "email_not_confirmed") {
+      setPendingEmail(email);
+      setAuthMode("verify-email");
+      setLoginNotice("Email chưa được xác minh.");
+      return;
+    }
     setLoginNotice(error ? error.message : "Đăng nhập thành công.");
   }
 
-  const active = prompts.find((prompt) => prompt.id === activeId) || prompts[0];
-  const current = active.versions[active.versions.length - 1];
+  const active = prompts.find((prompt) => prompt.id === activeId) || prompts[0] || null;
+  const current = active?.versions?.[active.versions.length - 1] || null;
   const filtered = prompts.filter((prompt) => `${prompt.title} ${prompt.tags.join(" ")}`.toLowerCase().includes(query.toLowerCase()));
 
   useEffect(() => {
@@ -315,10 +333,9 @@ export default function PromptLibrary() {
   }
 
   function deletePrompt() {
-    if (prompts.length === 1) return;
     const next = prompts.filter((prompt) => prompt.id !== active.id);
     setPrompts(next);
-    setActiveId(next[0].id);
+    setActiveId(next[0]?.id || null);
   }
 
   function exportData() {
@@ -352,8 +369,8 @@ export default function PromptLibrary() {
     reader.readAsText(file);
   }
 
-  const versionA = active.versions.find((version) => version.id === compareA) || active.versions[0];
-  const versionB = active.versions.find((version) => version.id === compareB) || current;
+  const versionA = active?.versions.find((version) => version.id === compareA) || active?.versions[0] || null;
+  const versionB = active?.versions.find((version) => version.id === compareB) || current;
   const changedLines = useMemo(() => {
     const a = versionA?.content.split("\n") || [];
     const b = versionB?.content.split("\n") || [];
@@ -364,11 +381,71 @@ export default function PromptLibrary() {
     return <main className="auth-screen"><div className="auth-card"><div className="brand-mark"><Sparkle size={22} weight="fill" /></div><h1>Prompt Library</h1><p>Đang kiểm tra phiên đăng nhập…</p></div></main>;
   }
 
-  if (!session) {
+  if (authMode === "verify-email" || (session && !emailVerified && !recoveryMode)) {
+    return (
+      <main className="auth-screen">
+        <div className="auth-card">
+          <div className="brand-mark"><EnvelopeSimple size={22} weight="fill" /></div>
+          <span className="eyebrow">VERIFY YOUR EMAIL</span>
+          <h1>Kiểm tra email</h1>
+          <p>
+            Xác minh <strong>{pendingEmail || session?.user?.email}</strong> để đăng nhập và sử dụng thư viện prompt.
+            Trước khi xác minh, tài khoản không thể đọc hoặc thay đổi dữ liệu.
+          </p>
+          <button className="button primary auth-button" onClick={resendVerification}><EnvelopeSimple size={17} /> Gửi lại email</button>
+          {loginNotice && <small>{loginNotice}</small>}
+          <div className="auth-switch"><button onClick={returnToLogin}>Quay lại đăng nhập</button></div>
+          <span className="auth-version">v{APP_VERSION}</span>
+        </div>
+      </main>
+    );
+  }
+
+  if (!session || recoveryMode) {
     const isRegister = authMode === "register";
     const isOtp = authMode === "verify";
     const isReset = authMode === "reset";
-    return <main className="auth-screen"><div className="auth-card"><div className="brand-mark"><Sparkle size={22} weight="fill" /></div><span className="eyebrow">YOUR PROMPT COLLECTION</span><h1>Prompt Library</h1><p>{isRegister ? "Tạo tài khoản để lưu prompt riêng của bạn." : authMode === "forgot" ? "Nhập email để nhận mã khôi phục." : isOtp ? "Nhập mã OTP trong email." : isReset ? "Đặt mật khẩu mới cho tài khoản." : "Đăng nhập để truy cập thư viện prompt của bạn."}</p><form className="auth-form" onSubmit={submitAuth}>{isRegister && <label><User size={16} /><input required minLength="3" maxLength="32" value={authForm.username} onChange={(e) => updateAuthField("username", e.target.value)} placeholder="Username" autoComplete="username" /></label>}{!isReset && <label><EnvelopeSimple size={16} /><input required type="email" value={authForm.email} onChange={(e) => updateAuthField("email", e.target.value)} placeholder="Email" autoComplete="email" /></label>}{(authMode === "login" || isRegister) && <label><Key size={16} /><input required minLength="8" type="password" value={authForm.password} onChange={(e) => updateAuthField("password", e.target.value)} placeholder="Password" autoComplete={isRegister ? "new-password" : "current-password"} /></label>}{isOtp && <label><LockKey size={16} /><input required inputMode="numeric" pattern="[0-9]{6}" maxLength="6" value={authForm.otp} onChange={(e) => updateAuthField("otp", e.target.value)} placeholder="6-digit OTP" /></label>}{isReset && <label><Key size={16} /><input required minLength="8" type="password" value={authForm.newPassword} onChange={(e) => updateAuthField("newPassword", e.target.value)} placeholder="New password" autoComplete="new-password" /></label>}<button className="button primary auth-button" type="submit"><LockKey size={17} weight="fill" /> {isRegister ? "Đăng ký" : authMode === "forgot" ? "Gửi OTP" : isOtp ? "Xác minh OTP" : isReset ? "Đổi mật khẩu" : "Đăng nhập"}</button></form>{loginNotice && <small>{loginNotice}</small>}<div className="auth-switch">{authMode === "login" ? <><button onClick={() => { setAuthMode("register"); setLoginNotice(""); }}>Tạo tài khoản</button><span>•</span><button onClick={() => { setAuthMode("forgot"); setLoginNotice(""); }}>Quên mật khẩu?</button></> : <button onClick={() => { setAuthMode("login"); setLoginNotice(""); }}>Quay lại đăng nhập</button>}</div><span className="auth-version">v{APP_VERSION}</span></div></main>;
+    return (
+      <main className="auth-screen">
+        <div className="auth-card">
+          <div className="brand-mark"><Sparkle size={22} weight="fill" /></div>
+          <span className="eyebrow">YOUR PROMPT COLLECTION</span>
+          <h1>Prompt Library</h1>
+          <p>{isRegister ? "Tạo tài khoản để lưu prompt riêng của bạn." : authMode === "forgot" ? "Nhập email để nhận mã khôi phục." : isOtp ? "Nhập mã OTP trong email." : isReset ? "Đặt mật khẩu mới cho tài khoản." : "Đăng nhập để truy cập thư viện prompt của bạn."}</p>
+          <form className="auth-form" onSubmit={submitAuth}>
+            {isRegister && <label><User size={18} /><input required minLength="3" maxLength="32" value={authForm.username} onChange={(e) => updateAuthField("username", e.target.value)} placeholder="Username" autoComplete="username" /></label>}
+            {!isReset && <label><EnvelopeSimple size={18} /><input required type="email" value={authForm.email} onChange={(e) => updateAuthField("email", e.target.value)} placeholder="Email" autoComplete="email" /></label>}
+            {(authMode === "login" || isRegister) && <label><Key size={18} /><input required minLength="8" type="password" value={authForm.password} onChange={(e) => updateAuthField("password", e.target.value)} placeholder="Password" autoComplete={isRegister ? "new-password" : "current-password"} /></label>}
+            {isOtp && <label><LockKey size={18} /><input required inputMode="numeric" pattern="[0-9]{6}" maxLength="6" value={authForm.otp} onChange={(e) => updateAuthField("otp", e.target.value)} placeholder="6-digit OTP" /></label>}
+            {isReset && <label><Key size={18} /><input required minLength="8" type="password" value={authForm.newPassword} onChange={(e) => updateAuthField("newPassword", e.target.value)} placeholder="New password" autoComplete="new-password" /></label>}
+            <button className="button primary auth-button" type="submit"><LockKey size={18} weight="fill" /> {isRegister ? "Đăng ký" : authMode === "forgot" ? "Gửi OTP" : isOtp ? "Xác minh OTP" : isReset ? "Đổi mật khẩu" : "Đăng nhập"}</button>
+          </form>
+          {loginNotice && <small>{loginNotice}</small>}
+          <div className="auth-switch">
+            {authMode === "login" ? <><button onClick={() => { setAuthMode("register"); setLoginNotice(""); }}>Tạo tài khoản</button><span>•</span><button onClick={() => { setAuthMode("forgot"); setLoginNotice(""); }}>Quên mật khẩu?</button></> : <button onClick={returnToLogin}>Quay lại đăng nhập</button>}
+          </div>
+          <span className="auth-version">v{APP_VERSION}</span>
+        </div>
+      </main>
+    );
+  }
+
+  if (cloudError && loadedUserId === session.user.id) {
+    return (
+      <main className="auth-screen">
+        <div className="auth-card">
+          <div className="brand-mark"><ArrowClockwise size={22} /></div>
+          <h1>Không thể tải dữ liệu</h1>
+          <p>Kết nối tới thư viện cloud thất bại. App chưa ghi hoặc thay đổi dữ liệu nào.</p>
+          <button className="button primary auth-button" onClick={() => setLoadAttempt((value) => value + 1)}>Thử lại</button>
+          <div className="auth-switch"><button onClick={() => supabase.auth.signOut()}>Đăng xuất</button></div>
+        </div>
+      </main>
+    );
+  }
+
+  if (!cloudReady || loadedUserId !== session.user.id) {
+    return <main className="auth-screen"><div className="auth-card"><div className="brand-mark"><Sparkle size={22} weight="fill" /></div><h1>Prompt Library</h1><p>Đang tải thư viện của bạn…</p></div></main>;
   }
 
   return (
@@ -395,8 +472,8 @@ export default function PromptLibrary() {
           <button className="button primary full" onClick={createPrompt}><Plus size={17} weight="bold" /> Prompt mới</button>
           <div className="prompt-list">
             {filtered.map((prompt) => (
-              <button key={prompt.id} className={`prompt-card ${prompt.id === active.id ? "active" : ""}`} onClick={() => setActiveId(prompt.id)}>
-                <div className="prompt-title"><FolderSimple size={17} weight={prompt.id === active.id ? "fill" : "regular"} /><strong>{prompt.title}</strong></div>
+              <button key={prompt.id} className={`prompt-card ${prompt.id === active?.id ? "active" : ""}`} onClick={() => setActiveId(prompt.id)}>
+                <div className="prompt-title"><FolderSimple size={17} weight={prompt.id === active?.id ? "fill" : "regular"} /><strong>{prompt.title}</strong></div>
                 <p>{prompt.description}</p>
                 <div className="card-meta"><span>{prompt.versions.length} versions</span><span>{prompt.updated}</span></div>
               </button>
@@ -409,9 +486,17 @@ export default function PromptLibrary() {
         </aside>
 
         <section className="main-panel">
+          {!active ? (
+            <div className="empty-state">
+              <div className="brand-mark"><Sparkle size={22} weight="fill" /></div>
+              <h2>Thư viện đang trống</h2>
+              <p>Tạo prompt đầu tiên hoặc import file backup của bạn.</p>
+              <button className="button primary" onClick={createPrompt}><Plus size={17} weight="bold" /> Tạo prompt đầu tiên</button>
+            </div>
+          ) : <>
           <div className="prompt-header">
             <div className="title-area">
-              <div className="eyebrow">PROMPT / {active.tags[0].toUpperCase()}</div>
+              <div className="eyebrow">PROMPT / {active.tags[0]?.toUpperCase() || "UNTAGGED"}</div>
               <input className="title-input" value={active.title} onChange={(e) => setPrompts((items) => items.map((p) => p.id === active.id ? { ...p, title: e.target.value } : p))} />
               <input className="description-input" value={active.description} onChange={(e) => setPrompts((items) => items.map((p) => p.id === active.id ? { ...p, description: e.target.value } : p))} />
             </div>
@@ -464,7 +549,7 @@ export default function PromptLibrary() {
               </div>
             </div>
           )}
-
+          </>}
         </section>
       </div>
     </main>
