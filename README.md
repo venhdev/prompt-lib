@@ -4,7 +4,7 @@ A focused multi-user library for reusable AI prompts.
 
 The application is publicly accessible. Each user's prompts remain private by default through Supabase Row Level Security.
 
-Current version: `0.2.1`
+Current version: `0.3.0`
 
 ## Features
 
@@ -15,6 +15,7 @@ Current version: `0.2.1`
 - Import and export JSON backups.
 - Email/password accounts with username profiles and Email OTP recovery.
 - Per-user cloud data isolation through Supabase Row Level Security.
+- Dark theme by default with a persisted Light theme option.
 
 ## Development
 

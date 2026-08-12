@@ -14,6 +14,7 @@ import {
   FolderSimple,
   GitBranch,
   LockKey,
+  Moon,
   EnvelopeSimple,
   User,
   Key,
@@ -22,6 +23,7 @@ import {
   Plus,
   SidebarSimple,
   Sparkle,
+  Sun,
   Trash,
   UploadSimple,
 } from "@phosphor-icons/react";
@@ -30,6 +32,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 
 const APP_VERSION = packageJson.version;
 const RECOVERY_INTENT_KEY = "prompt-lib:password-recovery";
+const THEME_KEY = "prompt-lib:theme";
 
 function newId() {
   return crypto.randomUUID();
@@ -44,6 +47,21 @@ function normalizePrompts(items) {
     updated: prompt.updated,
     versions: prompt.versions,
   }));
+}
+
+function ThemeToggle({ theme, onToggle }) {
+  const isDark = theme === "dark";
+  return (
+    <button
+      className="theme-toggle"
+      onClick={onToggle}
+      type="button"
+      aria-label={`Switch to ${isDark ? "light" : "dark"} theme`}
+      title={`Switch to ${isDark ? "light" : "dark"} theme`}
+    >
+      {isDark ? <Sun size={17} /> : <Moon size={17} />}
+    </button>
+  );
 }
 
 export default function PromptLibrary() {
@@ -65,11 +83,24 @@ export default function PromptLibrary() {
   const [authMode, setAuthMode] = useState(() => typeof window !== "undefined" && localStorage.getItem(RECOVERY_INTENT_KEY) === "true" ? "reset" : "login");
   const [pendingEmail, setPendingEmail] = useState("");
   const [recoveryMode, setRecoveryMode] = useState(() => typeof window !== "undefined" && localStorage.getItem(RECOVERY_INTENT_KEY) === "true");
+  const [theme, setTheme] = useState(() => {
+    if (typeof window === "undefined") return "dark";
+    return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark";
+  });
   const [authForm, setAuthForm] = useState({ username: "", email: "", password: "", otp: "", newPassword: "" });
   const activeUserIdRef = useRef(null);
   const syncQueueRef = useRef(Promise.resolve());
 
   const emailVerified = Boolean(session?.user?.email_confirmed_at);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
+
+  function toggleTheme() {
+    setTheme((currentTheme) => currentTheme === "dark" ? "light" : "dark");
+  }
 
   useEffect(() => {
     activeUserIdRef.current = session?.user?.id || null;
@@ -392,12 +423,13 @@ export default function PromptLibrary() {
   }, [versionA, versionB]);
 
   if (!authReady) {
-    return <main className="auth-screen"><div className="auth-card"><div className="brand-mark"><Sparkle size={22} weight="fill" /></div><h1>Prompt Library</h1><p>Đang kiểm tra phiên đăng nhập…</p></div></main>;
+    return <main className="auth-screen"><ThemeToggle theme={theme} onToggle={toggleTheme} /><div className="auth-card"><div className="brand-mark"><Sparkle size={22} weight="fill" /></div><h1>Prompt Library</h1><p>Đang kiểm tra phiên đăng nhập…</p></div></main>;
   }
 
   if (authMode === "verify-email" || (session && !emailVerified && !recoveryMode)) {
     return (
       <main className="auth-screen">
+        <ThemeToggle theme={theme} onToggle={toggleTheme} />
         <div className="auth-card">
           <div className="brand-mark"><EnvelopeSimple size={22} weight="fill" /></div>
           <span className="eyebrow">VERIFY YOUR EMAIL</span>
@@ -421,6 +453,7 @@ export default function PromptLibrary() {
     const isReset = authMode === "reset";
     return (
       <main className="auth-screen">
+        <ThemeToggle theme={theme} onToggle={toggleTheme} />
         <div className="auth-card">
           <div className="brand-mark"><Sparkle size={22} weight="fill" /></div>
           <span className="eyebrow">YOUR PROMPT COLLECTION</span>
@@ -447,6 +480,7 @@ export default function PromptLibrary() {
   if (cloudError && loadedUserId === session.user.id) {
     return (
       <main className="auth-screen">
+        <ThemeToggle theme={theme} onToggle={toggleTheme} />
         <div className="auth-card">
           <div className="brand-mark"><ArrowClockwise size={22} /></div>
           <h1>Không thể tải dữ liệu</h1>
@@ -459,7 +493,7 @@ export default function PromptLibrary() {
   }
 
   if (!cloudReady || loadedUserId !== session.user.id) {
-    return <main className="auth-screen"><div className="auth-card"><div className="brand-mark"><Sparkle size={22} weight="fill" /></div><h1>Prompt Library</h1><p>Đang tải thư viện của bạn…</p></div></main>;
+    return <main className="auth-screen"><ThemeToggle theme={theme} onToggle={toggleTheme} /><div className="auth-card"><div className="brand-mark"><Sparkle size={22} weight="fill" /></div><h1>Prompt Library</h1><p>Đang tải thư viện của bạn…</p></div></main>;
   }
 
   return (
@@ -471,6 +505,7 @@ export default function PromptLibrary() {
           <div><strong>Prompt Library</strong><span>{session.user.user_metadata?.username || session.user.email}</span></div>
         </div>
         <div className="top-actions">
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
           <span className="save-state"><Check size={14} weight="bold" /> {notice}</span>
           <label className="button ghost file-button"><UploadSimple size={16} /> Import<input type="file" accept="application/json" onChange={importData} /></label>
           <button className="button ghost" onClick={exportData}><DownloadSimple size={16} /> Export</button>

@@ -51,14 +51,26 @@ if (!javascript || !stylesheet) {
   throw new Error("Client bundle did not produce JavaScript and CSS outputs.");
 }
 
+const themeBootstrap = `<script>
+  (() => {
+    try {
+      const storedTheme = localStorage.getItem("prompt-lib:theme");
+      document.documentElement.dataset.theme = storedTheme === "light" ? "light" : "dark";
+    } catch {
+      document.documentElement.dataset.theme = "dark";
+    }
+  })();
+</script>`;
+
 const html = `<!doctype html>
 <html lang="vi">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="light dark" />
     <title>Prompt Library</title>
     <meta name="description" content="A personal library for reusable AI prompts and version history." />
+    ${themeBootstrap}
     <style>${stylesheet.text}</style>
   </head>
   <body>
