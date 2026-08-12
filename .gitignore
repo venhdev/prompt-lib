@@ -1,0 +1,9 @@
+node_modules
+.next
+.open-next
+dist
+.openai
+.env*
+!.env.example
+npm-debug.log*
+next-env.d.ts
