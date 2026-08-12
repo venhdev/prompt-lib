@@ -14,7 +14,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; min-height: 100%; background: var(--canvas); color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+html, body { margin: 0; min-height: 100%; overflow-x: hidden; background: var(--canvas); color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 button, input, textarea, select { font: inherit; }
 button { color: inherit; }
 .app-shell { min-height: 100vh; }
@@ -54,12 +54,13 @@ button { color: inherit; }
 .icon-button.danger:hover { color: var(--red); border-color: #ecc7c7; background: #fff5f5; }
 .file-button input { display: none; }
 .workspace { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: calc(100vh - 64px); }
+.sidebar-backdrop { display: none; }
 .sidebar { background: #fafafa; border-right: 1px solid var(--line); padding: 20px 14px 14px; display: flex; flex-direction: column; min-width: 0; }
 .sidebar-heading { display: flex; justify-content: space-between; align-items: center; padding: 0 7px 12px; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .count { display: grid; place-items: center; min-width: 22px; height: 20px; border-radius: 6px; background: #eceef1; color: var(--muted); font-size: 11px; }
 .search { height: 37px; border: 1px solid var(--line); background: #fff; border-radius: 8px; display: flex; align-items: center; gap: 7px; padding: 0 10px; margin-bottom: 10px; color: #9399a4; }
 .search input { width: 100%; border: 0; outline: 0; font-size: 13px; background: transparent; }
-.prompt-list { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.prompt-list { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; min-height: 0; overflow-y: auto; }
 .prompt-card { text-align: left; border: 1px solid transparent; background: transparent; padding: 11px; border-radius: 10px; cursor: pointer; }
 .prompt-card:hover { background: #f1f2f4; }
 .prompt-card.active { background: #fff; border-color: var(--line); box-shadow: 0 4px 15px rgba(35, 40, 50, .06); }
@@ -137,21 +138,65 @@ button { color: inherit; }
 }
 
 @media (max-width: 720px) {
-  .topbar { padding: 0 12px; }
+  .topbar { height: 58px; padding: 0 max(10px, env(safe-area-inset-right)) 0 max(10px, env(safe-area-inset-left)); }
   .brand { min-width: 0; }
-  .brand > div:last-child, .topbar .button.ghost { display: none; }
+  .brand > div:last-child, .topbar .button.ghost, .privacy-pill { display: none; }
+  .top-actions { gap: 6px; }
+  .top-signout, .mobile-only { width: 42px; height: 42px; }
   .mobile-only { display: grid; background: #202530; border-color: #373e4a; color: white; }
   .workspace { display: block; }
-  .sidebar { position: fixed; z-index: 15; top: 64px; bottom: 0; left: 0; width: 260px; box-shadow: 18px 0 40px rgba(0,0,0,.16); transition: transform .22s ease; }
+  .sidebar-backdrop { display: block; position: fixed; z-index: 14; inset: 58px 0 0; border: 0; padding: 0; background: rgba(17, 21, 30, .42); opacity: 1; transition: opacity .22s ease; }
+  .sidebar { position: fixed; z-index: 15; top: 58px; bottom: 0; left: 0; width: min(86vw, 320px); padding: 18px 14px max(14px, env(safe-area-inset-bottom)); box-shadow: 18px 0 40px rgba(0,0,0,.16); transition: transform .22s ease; }
   .sidebar-collapsed .sidebar { transform: translateX(-105%); }
-  .main-panel { padding: 18px 13px 30px; }
-  .prompt-header { align-items: flex-start; }
-  .title-input { font-size: 22px; }
-  .header-actions .icon-button { display: none; }
-  .tabs { gap: 18px; }
+  .sidebar-collapsed .sidebar-backdrop { opacity: 0; pointer-events: none; }
+  .sidebar-heading, .search input, .prompt-title { font-size: 14px; }
+  .search { height: 44px; }
+  .prompt-card { padding: 13px 11px; }
+  .button.full { height: 44px; }
+  .main-panel { padding: 18px 14px max(30px, env(safe-area-inset-bottom)); }
+  .prompt-header { align-items: stretch; flex-direction: column; gap: 14px; }
+  .title-input { font-size: clamp(22px, 7vw, 27px); }
+  .description-input { font-size: 16px; line-height: 1.45; }
+  .header-actions { width: 100%; }
+  .header-actions .icon-button { display: grid; width: 42px; height: 42px; flex: 0 0 42px; }
+  .header-actions .button { height: 42px; flex: 1; }
+  .tabs { gap: 24px; overflow-x: auto; }
+  .tabs button { min-height: 44px; font-size: 14px; }
   .diff-grid { grid-template-columns: 1fr; }
   .diff-card pre { min-height: 240px; }
-  .prompt-editor { min-height: 430px; padding: 18px; font-size: 13px; }
+  .editor-layout, .compare-view { padding-top: 14px; }
+  .card-toolbar { min-height: 50px; height: auto; padding: 9px 11px; gap: 8px; }
+  .version-select { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .muted { display: none; }
+  .tiny-button { min-width: 67px; height: 34px; }
+  .prompt-editor { min-height: calc(100dvh - 330px); padding: 17px 15px; font-size: 16px; line-height: 1.65; }
   .toolbar-right > span { display: none; }
-  .privacy-pill { font-size: 0; padding: 8px; }
+  .editor-footer { height: auto; min-height: 42px; padding: 8px 11px; gap: 12px; }
+  .empty-state { min-height: calc(100dvh - 120px); padding: 24px 10px; }
+  .empty-state p { font-size: 15px; line-height: 1.5; }
+  .auth-screen { padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); place-items: start center; overflow-y: auto; }
+  .auth-card { margin: auto 0; padding: 32px 22px; border-radius: 15px; }
+  .auth-card h1 { font-size: 29px; }
+  .auth-card p { font-size: 15px; line-height: 1.55; }
+  .auth-form { gap: 12px; }
+  .auth-form label { height: 50px; }
+  .auth-form input { font-size: 16px; }
+  .auth-button { height: 48px; font-size: 15px; }
+  .auth-switch, .auth-switch button { font-size: 13px; }
+  .compare-summary { align-items: stretch; flex-direction: column; gap: 12px; }
+  .compare-summary > div { align-items: flex-start; flex-wrap: wrap; }
+  .compare-summary > div span { width: 100%; margin-left: 26px; }
+  .compare-summary .button { width: 100%; height: 42px; }
+  .diff-head { height: 52px; }
+  .diff-head select { height: 36px; min-width: 0; font-size: 14px; }
+  .diff-card pre { font-size: 13px; }
+}
+
+@media (max-width: 390px) {
+  .main-panel { padding-left: 10px; padding-right: 10px; }
+  .brand-mark { width: 30px; height: 30px; }
+  .topbar .brand-mark { display: none; }
+  .editor-footer > span:last-child { display: none; }
+  .auth-card { padding: 28px 18px; }
+  .auth-card h1 { font-size: 27px; }
 }

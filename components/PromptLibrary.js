@@ -76,6 +76,14 @@ export default function PromptLibrary() {
   }, [session?.user?.id]);
 
   useEffect(() => {
+    const mobile = window.matchMedia("(max-width: 720px)");
+    const syncSidebar = (event) => setSidebarOpen(!event.matches);
+    syncSidebar(mobile);
+    mobile.addEventListener("change", syncSidebar);
+    return () => mobile.removeEventListener("change", syncSidebar);
+  }, []);
+
+  useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       activeUserIdRef.current = data.session?.user?.id || null;
       setSession(data.session);
@@ -314,6 +322,12 @@ export default function PromptLibrary() {
     };
     setPrompts((items) => [prompt, ...items]);
     setActiveId(id);
+    setSidebarOpen(false);
+  }
+
+  function selectPrompt(id) {
+    setActiveId(id);
+    setSidebarOpen(false);
   }
 
   function saveVersion() {
@@ -466,13 +480,14 @@ export default function PromptLibrary() {
       </header>
 
       <div className={`workspace ${sidebarOpen ? "" : "sidebar-collapsed"}`}>
+        <button className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Đóng danh sách prompt" />
         <aside className="sidebar">
           <div className="sidebar-heading"><span>Prompt library</span><span className="count">{prompts.length}</span></div>
           <div className="search"><MagnifyingGlass size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Tìm prompt…" /></div>
           <button className="button primary full" onClick={createPrompt}><Plus size={17} weight="bold" /> Prompt mới</button>
           <div className="prompt-list">
             {filtered.map((prompt) => (
-              <button key={prompt.id} className={`prompt-card ${prompt.id === active?.id ? "active" : ""}`} onClick={() => setActiveId(prompt.id)}>
+              <button key={prompt.id} className={`prompt-card ${prompt.id === active?.id ? "active" : ""}`} onClick={() => selectPrompt(prompt.id)}>
                 <div className="prompt-title"><FolderSimple size={17} weight={prompt.id === active?.id ? "fill" : "regular"} /><strong>{prompt.title}</strong></div>
                 <p>{prompt.description}</p>
                 <div className="card-meta"><span>{prompt.versions.length} versions</span><span>{prompt.updated}</span></div>
@@ -501,8 +516,8 @@ export default function PromptLibrary() {
               <input className="description-input" value={active.description} onChange={(e) => setPrompts((items) => items.map((p) => p.id === active.id ? { ...p, description: e.target.value } : p))} />
             </div>
             <div className="header-actions">
-              <button className="icon-button" onClick={duplicatePrompt} title="Duplicate"><Copy size={17} /></button>
-              <button className="icon-button danger" onClick={deletePrompt} title="Delete"><Trash size={17} /></button>
+              <button className="icon-button" onClick={duplicatePrompt} title="Duplicate" aria-label="Nhân bản prompt"><Copy size={17} /></button>
+              <button className="icon-button danger" onClick={deletePrompt} title="Delete" aria-label="Xóa prompt"><Trash size={17} /></button>
               <button className="button dark" onClick={saveVersion}><GitBranch size={17} /> Lưu version</button>
             </div>
           </div>

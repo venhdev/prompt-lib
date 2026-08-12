@@ -4,7 +4,7 @@ A focused multi-user library for reusable AI prompts.
 
 The application is publicly accessible. Each user's prompts remain private by default through Supabase Row Level Security.
 
-Current version: `0.2.0`
+Current version: `0.2.1`
 
 ## Features
 
