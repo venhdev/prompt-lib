@@ -121,6 +121,14 @@ button { color: inherit; }
 .sidebar-filter.active { box-shadow: inset 2px 0 var(--accent); }
 .sidebar-mini-action { width: 22px; height: 24px; border-radius: 5px; }
 .sidebar-mini-action.danger:hover { background: var(--red-soft); color: var(--red); }
+.inline-editor, .inline-confirm { display: flex; align-items: center; gap: 5px; min-height: 32px; padding: 3px 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-raised); }
+.inline-editor input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 12px; }
+.inline-editor button, .inline-confirm button { display: inline-grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--muted); cursor: pointer; }
+.inline-editor button:hover, .inline-confirm button:hover { color: var(--ink); background: var(--surface-hover); }
+.inline-confirm { justify-content: space-between; color: var(--red); font-size: 12px; }
+.inline-confirm > div { display: flex; gap: 4px; }
+.inline-confirm button.danger:hover { border-color: var(--red); color: var(--red); background: var(--red-soft); }
+.sidebar-empty { padding: 4px 7px; color: var(--subtle); font-size: 11px; }
 .count { display: grid; place-items: center; min-width: 22px; height: 20px; border-radius: 6px; background: var(--surface-hover); color: var(--muted); font-size: 11px; }
 .search { height: 37px; border: 1px solid var(--line); background: var(--panel-raised); border-radius: 8px; display: flex; align-items: center; gap: 7px; padding: 0 10px; margin-bottom: 10px; color: var(--muted); }
 .search input { width: 100%; border: 0; outline: 0; font-size: 13px; background: transparent; }
@@ -162,6 +170,13 @@ button { color: inherit; }
 .tag-chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 7px; color: var(--accent); background: var(--surface-hover); font-size: 11px; }
 .tag-chip button { display: inline-grid; place-items: center; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
 .tag-input { width: 100px; border-style: dashed; }
+.tag-entry { position: relative; }
+.tag-entry-controls { display: flex; align-items: center; gap: 4px; }
+.tag-add { display: inline-grid; place-items: center; width: 25px; height: 25px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--muted); cursor: pointer; }
+.tag-add:hover { color: var(--ink); background: var(--surface-hover); }
+.tag-suggestions { position: absolute; z-index: 8; top: calc(100% + 4px); left: 0; min-width: 130px; padding: 4px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-raised); box-shadow: var(--shadow-card); }
+.tag-suggestions button { display: block; width: 100%; padding: 6px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); text-align: left; font-size: 11px; cursor: pointer; }
+.tag-suggestions button:hover { background: var(--surface-hover); }
 .description-input { color: var(--muted); font-size: 13px; margin-top: 6px; }
 .prompt-title-heading { margin: 0; font-size: clamp(22px, 2.2vw, 28px); line-height: 1.2; letter-spacing: -.03em; }
 .prompt-description-text { margin: 6px 0 0; color: var(--muted); font-size: 13px; }

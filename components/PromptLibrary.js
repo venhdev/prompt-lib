@@ -165,6 +165,19 @@ function ThemeToggle({ theme, onToggle }) {
   );
 }
 
+function ConfirmDialog({ open, title, description, confirmLabel = "Xác nhận", cancelLabel = "Hủy", tone = "primary", onConfirm, onCancel }) {
+  if (!open) return null;
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="dynamic-dialog-title">
+        <h2 id="dynamic-dialog-title">{title}</h2>
+        {description && <p>{description}</p>}
+        <div className="dialog-actions"><button className="button ghost" onClick={onCancel}>{cancelLabel}</button><button className={`button ${tone}`} onClick={onConfirm}>{confirmLabel}</button></div>
+      </section>
+    </div>
+  );
+}
+
 export default function PromptLibrary() {
   const [prompts, setPrompts] = useState([]);
   const [folders, setFolders] = useState([]);
@@ -174,6 +187,10 @@ export default function PromptLibrary() {
   const [activeFolderId, setActiveFolderId] = useState(null);
   const [selectedTagIds, setSelectedTagIds] = useState([]);
   const [tagInput, setTagInput] = useState("");
+  const [folderEditor, setFolderEditor] = useState(null);
+  const [tagEditor, setTagEditor] = useState(null);
+  const [inlineConfirm, setInlineConfirm] = useState(null);
+  const [dialog, setDialog] = useState(null);
   const [tab, setTab] = useState("editor");
   const [isEditing, setIsEditing] = useState(false);
   const [pendingPromptId, setPendingPromptId] = useState(null);
@@ -447,6 +464,7 @@ export default function PromptLibrary() {
 
   async function confirmSignOut() {
     setConfirmLogout(false);
+    setDialog(null);
     await supabase.auth.signOut();
   }
 
@@ -583,25 +601,34 @@ export default function PromptLibrary() {
   }
 
   function createFolder() {
-    const name = window.prompt("Tên folder mới")?.trim();
-    if (!name) return;
-    if (folders.some((folder) => folder.name.toLowerCase() === name.toLowerCase())) return setNotice("Folder đã tồn tại");
-    const now = new Date().toISOString();
-    setFolders((items) => [...items, { id: newId(), name: name.slice(0, 80), position: items.length, createdAt: now, updatedAt: now }]);
+    setFolderEditor({ mode: "create", value: "" });
   }
 
   function renameFolder(folder) {
-    const name = window.prompt("Đổi tên folder", folder.name)?.trim();
-    if (!name || name.toLowerCase() === folder.name.toLowerCase()) return;
-    if (folders.some((item) => item.id !== folder.id && item.name.toLowerCase() === name.toLowerCase())) return setNotice("Folder đã tồn tại");
-    setFolders((items) => items.map((item) => item.id === folder.id ? { ...item, name: name.slice(0, 80), updatedAt: new Date().toISOString() } : item));
+    setFolderEditor({ mode: "rename", id: folder.id, value: folder.name });
   }
 
   function deleteFolder(folder) {
-    if (!window.confirm(`Xóa folder “${folder.name}”? Prompt bên trong sẽ chuyển thành Unfiled.`)) return;
+    setInlineConfirm({ type: "folder-delete", id: folder.id });
+  }
+
+  function saveFolderEditor() {
+    const value = folderEditor?.value.trim();
+    if (!value) return setNotice("Tên folder không được để trống");
+    if (folders.some((folder) => folder.id !== folderEditor.id && folder.name.toLowerCase() === value.toLowerCase())) return setNotice("Folder đã tồn tại");
+    const now = new Date().toISOString();
+    if (folderEditor.mode === "create") setFolders((items) => [...items, { id: newId(), name: value.slice(0, 80), position: items.length, createdAt: now, updatedAt: now }]);
+    else setFolders((items) => items.map((item) => item.id === folderEditor.id ? { ...item, name: value.slice(0, 80), updatedAt: now } : item));
+    setFolderEditor(null);
+  }
+
+  function confirmFolderDelete(folderId) {
+    const folder = folders.find((item) => item.id === folderId);
+    if (!folder) return;
     setFolders((items) => items.filter((item) => item.id !== folder.id));
     setPrompts((items) => items.map((prompt) => prompt.folderId === folder.id ? { ...prompt, folderId: null, updatedAt: new Date().toISOString() } : prompt));
     if (activeFolderId === folder.id) setActiveFolderId(null);
+    setInlineConfirm(null);
   }
 
   function toggleTagFilter(tagId) {
@@ -624,17 +651,26 @@ export default function PromptLibrary() {
   }
 
   function renameTag(tag) {
-    const normalizedName = normalizeTagName(window.prompt("Đổi tên tag", tag.name));
-    if (!normalizedName || normalizedName === tag.normalizedName) return;
-    if (tags.some((item) => item.id !== tag.id && item.normalizedName === normalizedName)) return setNotice("Tag đã tồn tại");
-    setTags((items) => items.map((item) => item.id === tag.id ? { ...item, name: normalizedName, normalizedName, updatedAt: new Date().toISOString() } : item));
+    setTagEditor({ id: tag.id, value: tag.name });
   }
 
   function deleteTag(tag) {
-    if (!window.confirm(`Xóa tag “${tag.name}” khỏi toàn bộ library?`)) return;
-    setTags((items) => items.filter((item) => item.id !== tag.id));
-    setPrompts((items) => items.map((prompt) => (prompt.tagIds || []).includes(tag.id) ? { ...prompt, tagIds: prompt.tagIds.filter((id) => id !== tag.id), updatedAt: new Date().toISOString() } : prompt));
-    setSelectedTagIds((ids) => ids.filter((id) => id !== tag.id));
+    setInlineConfirm({ type: "tag-delete", id: tag.id });
+  }
+
+  function saveTagEditor() {
+    const normalizedName = normalizeTagName(tagEditor?.value);
+    if (!normalizedName) return setNotice("Tên tag không được để trống");
+    if (tags.some((item) => item.id !== tagEditor.id && item.normalizedName === normalizedName)) return setNotice("Tag đã tồn tại");
+    setTags((items) => items.map((item) => item.id === tagEditor.id ? { ...item, name: normalizedName, normalizedName, updatedAt: new Date().toISOString() } : item));
+    setTagEditor(null);
+  }
+
+  function confirmTagDelete(tagId) {
+    setTags((items) => items.filter((item) => item.id !== tagId));
+    setPrompts((items) => items.map((prompt) => (prompt.tagIds || []).includes(tagId) ? { ...prompt, tagIds: prompt.tagIds.filter((id) => id !== tagId), updatedAt: new Date().toISOString() } : prompt));
+    setSelectedTagIds((ids) => ids.filter((id) => id !== tagId));
+    setInlineConfirm(null);
   }
 
   async function pasteMarkdown() {
@@ -868,13 +904,19 @@ export default function PromptLibrary() {
   }
 
   function deletePrompt() {
-    if (!selectedPrompt || !window.confirm(`Xóa prompt “${selectedPrompt.title || "Untitled prompt"}”? Hành động này không thể hoàn tác.`)) return;
+    if (!selectedPrompt) return;
+    setDialog({ type: "prompt-delete", title: displayTitle(selectedPrompt) });
+  }
+
+  function confirmPromptDelete() {
+    if (!selectedPrompt) return;
     const next = prompts.filter((prompt) => prompt.id !== selectedPrompt.id);
     setPrompts(next);
     editSnapshotRef.current = null;
     setIsEditing(false);
     setSelectedPromptId(next[0]?.id || null);
     setNotice("Đã xóa prompt");
+    setDialog(null);
   }
 
   function exportData() {
@@ -1004,8 +1046,9 @@ export default function PromptLibrary() {
           <h1>Không thể tải dữ liệu</h1>
           <p>Kết nối tới thư viện cloud thất bại. App chưa ghi hoặc thay đổi dữ liệu nào.</p>
           <button className="button primary auth-button" onClick={() => setLoadAttempt((value) => value + 1)}>Thử lại</button>
-          <div className="auth-switch"><button onClick={() => { if (window.confirm("Đăng xuất khỏi Prompt Library?")) supabase.auth.signOut(); }}>Đăng xuất</button></div>
+          <div className="auth-switch"><button onClick={() => setDialog({ type: "logout" })}>Đăng xuất</button></div>
         </div>
+        <ConfirmDialog open={dialog?.type === "logout"} title="Đăng xuất?" description="Phiên làm việc hiện tại sẽ được đóng trên thiết bị này." confirmLabel="Đăng xuất" onCancel={() => setDialog(null)} onConfirm={confirmSignOut} />
       </main>
     );
   }
@@ -1049,13 +1092,15 @@ export default function PromptLibrary() {
           <button className="button primary full" onClick={createPrompt}><Plus size={17} weight="bold" /> Prompt mới</button>
           <div className="sidebar-section">
             <div className="sidebar-section-heading"><span>Folders</span><button className="sidebar-add" onClick={createFolder} aria-label="Tạo folder"><Plus size={15} /></button></div>
-            <button className={`sidebar-filter ${!activeFolderId ? "active" : ""}`} onClick={() => setActiveFolderId(null)}>Tất cả prompt <span>{prompts.length}</span></button>
-            <button className={`sidebar-filter ${activeFolderId === "__unfiled__" ? "active" : ""}`} onClick={() => setActiveFolderId("__unfiled__")}>Unfiled <span>{prompts.filter((prompt) => !prompt.folderId).length}</span></button>
-            {folders.map((folder) => <div className="sidebar-filter-row" key={folder.id}><button className={`sidebar-filter ${activeFolderId === folder.id ? "active" : ""}`} onClick={() => setActiveFolderId(folder.id)}>{folder.name}<span>{prompts.filter((prompt) => prompt.folderId === folder.id).length}</span></button><button className="sidebar-mini-action" onClick={() => renameFolder(folder)} aria-label={`Đổi tên ${folder.name}`}><PencilSimple size={13} /></button><button className="sidebar-mini-action danger" onClick={() => deleteFolder(folder)} aria-label={`Xóa ${folder.name}`}><Trash size={13} /></button></div>)}
+            {folderEditor?.mode === "create" && <div className="inline-editor"><input autoFocus maxLength={80} value={folderEditor.value} onChange={(e) => setFolderEditor({ ...folderEditor, value: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") saveFolderEditor(); if (e.key === "Escape") setFolderEditor(null); }} placeholder="Tên folder…" /><button onClick={saveFolderEditor} aria-label="Lưu folder"><Check size={14} /></button><button onClick={() => setFolderEditor(null)} aria-label="Hủy tạo folder"><X size={14} /></button></div>}
+            <button className={`sidebar-filter ${!activeFolderId ? "active" : ""}`} onClick={() => setActiveFolderId(null)}>Tất cả <span>{prompts.length}</span></button>
+            <button className={`sidebar-filter ${activeFolderId === "__unfiled__" ? "active" : ""}`} onClick={() => setActiveFolderId("__unfiled__")}>Unified <span>{prompts.filter((prompt) => !prompt.folderId).length}</span></button>
+            {folders.map((folder) => folderEditor?.id === folder.id ? <div className="inline-editor" key={folder.id}><input autoFocus maxLength={80} value={folderEditor.value} onChange={(e) => setFolderEditor({ ...folderEditor, value: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") saveFolderEditor(); if (e.key === "Escape") setFolderEditor(null); }} /><button onClick={saveFolderEditor} aria-label="Lưu tên folder"><Check size={14} /></button><button onClick={() => setFolderEditor(null)} aria-label="Hủy đổi tên folder"><X size={14} /></button></div> : inlineConfirm?.type === "folder-delete" && inlineConfirm.id === folder.id ? <div className="inline-confirm" key={folder.id}><strong>Delete?</strong><div><button onClick={() => setInlineConfirm(null)} aria-label="Hủy xóa folder"><X size={14} /></button><button className="danger" onClick={() => confirmFolderDelete(folder.id)} aria-label="Xác nhận xóa folder"><Trash size={14} /></button></div></div> : <div className="sidebar-filter-row" key={folder.id}><button className={`sidebar-filter ${activeFolderId === folder.id ? "active" : ""}`} onClick={() => setActiveFolderId(folder.id)}>{folder.name}<span>{prompts.filter((prompt) => prompt.folderId === folder.id).length}</span></button><button className="sidebar-mini-action" onClick={() => renameFolder(folder)} aria-label={`Đổi tên ${folder.name}`}><PencilSimple size={13} /></button><button className="sidebar-mini-action danger" onClick={() => deleteFolder(folder)} aria-label={`Xóa ${folder.name}`}><Trash size={13} /></button></div>)}
           </div>
           <div className="sidebar-section">
             <div className="sidebar-section-heading"><span>Tags</span><span className="count">{tags.length}</span></div>
-            {tags.map((tag) => <div className="sidebar-filter-row" key={tag.id}><button className={`sidebar-filter ${selectedTagIds.includes(tag.id) ? "active" : ""}`} onClick={() => toggleTagFilter(tag.id)}>#{tag.name}<span>{prompts.filter((prompt) => (prompt.tagIds || []).includes(tag.id)).length}</span></button><button className="sidebar-mini-action" onClick={() => renameTag(tag)} aria-label={`Đổi tên tag ${tag.name}`}><PencilSimple size={13} /></button><button className="sidebar-mini-action danger" onClick={() => deleteTag(tag)} aria-label={`Xóa tag ${tag.name}`}><Trash size={13} /></button></div>)}
+            {!tags.length && <div className="sidebar-empty">Chưa có tag</div>}
+            {tags.map((tag) => tagEditor?.id === tag.id ? <div className="inline-editor" key={tag.id}><input autoFocus maxLength={32} value={tagEditor.value} onChange={(e) => setTagEditor({ ...tagEditor, value: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") saveTagEditor(); if (e.key === "Escape") setTagEditor(null); }} /><button onClick={saveTagEditor} aria-label="Lưu tên tag"><Check size={14} /></button><button onClick={() => setTagEditor(null)} aria-label="Hủy đổi tên tag"><X size={14} /></button></div> : inlineConfirm?.type === "tag-delete" && inlineConfirm.id === tag.id ? <div className="inline-confirm" key={tag.id}><strong>Delete?</strong><div><button onClick={() => setInlineConfirm(null)} aria-label="Hủy xóa tag"><X size={14} /></button><button className="danger" onClick={() => confirmTagDelete(tag.id)} aria-label="Xác nhận xóa tag"><Trash size={14} /></button></div></div> : <div className="sidebar-filter-row" key={tag.id}><button className={`sidebar-filter ${selectedTagIds.includes(tag.id) ? "active" : ""}`} onClick={() => toggleTagFilter(tag.id)}>#{tag.name}<span>{prompts.filter((prompt) => (prompt.tagIds || []).includes(tag.id)).length}</span></button><button className="sidebar-mini-action" onClick={() => renameTag(tag)} aria-label={`Đổi tên tag ${tag.name}`}><PencilSimple size={13} /></button><button className="sidebar-mini-action danger" onClick={() => deleteTag(tag)} aria-label={`Xóa tag ${tag.name}`}><Trash size={13} /></button></div>)}
           </div>
           <div className="prompt-list">
             {filtered.map((prompt) => (
@@ -1110,8 +1155,8 @@ export default function PromptLibrary() {
                 <p className="prompt-description-text">{selectedPrompt.description || "Chưa có mô tả"}</p>
               </>}
               <div className="prompt-metadata">
-                {isEditing ? <select className="metadata-select" value={selectedPrompt.folderId || ""} onChange={(e) => updatePromptDetails({ folderId: e.target.value || null })}><option value="">Unfiled</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select> : selectedPrompt.folderId && <span className="metadata-folder"><FolderSimple size={14} /> {folderById.get(selectedPrompt.folderId)?.name}</span>}
-                <div className="tag-chips">{(selectedPrompt.tagIds || []).map((tagId) => { const tag = tagById.get(tagId); return tag ? <span className="tag-chip" key={tag.id}>#{tag.name}{isEditing && <button onClick={() => removeTagFromPrompt(tag.id)} aria-label={`Xóa tag ${tag.name}`}><X size={12} /></button>}</span> : null; })}{isEditing && <input className="tag-input" value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTagToPrompt(); } }} placeholder="Thêm tag…" aria-label="Thêm tag" />}</div>
+                {isEditing ? <select className="metadata-select" value={selectedPrompt.folderId || ""} onChange={(e) => updatePromptDetails({ folderId: e.target.value || null })}><option value="">Unified</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select> : selectedPrompt.folderId && <span className="metadata-folder"><FolderSimple size={14} /> {folderById.get(selectedPrompt.folderId)?.name}</span>}
+                <div className="tag-chips">{(selectedPrompt.tagIds || []).map((tagId) => { const tag = tagById.get(tagId); return tag ? <span className="tag-chip" key={tag.id}>#{tag.name}{isEditing && <button onClick={() => removeTagFromPrompt(tag.id)} aria-label={`Xóa tag ${tag.name}`}><X size={12} /></button>}</span> : null; })}{isEditing && <div className="tag-entry"><div className="tag-entry-controls"><input className="tag-input" value={tagInput} onChange={(e) => setTagInput(e.target.value)} onBlur={() => addTagToPrompt()} onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTagToPrompt(); } }} placeholder="Thêm tag…" aria-label="Thêm tag" /><button className="tag-add" onMouseDown={(e) => e.preventDefault()} onClick={() => addTagToPrompt()} aria-label="Thêm tag"><Plus size={14} /></button></div>{tagInput.trim() && <div className="tag-suggestions">{tags.filter((tag) => !(selectedPrompt.tagIds || []).includes(tag.id) && tag.normalizedName.includes(normalizeTagName(tagInput))).slice(0, 5).map((tag) => <button key={tag.id} onMouseDown={(e) => e.preventDefault()} onClick={() => { addTagToPrompt(tag.name); setTagInput(""); }}>#{tag.name}</button>)}</div>}</div>}</div>
               </div>
             </div>
             <div className="header-actions">
@@ -1175,13 +1220,7 @@ export default function PromptLibrary() {
           </>}
         </section>
       </div>
-      {confirmLogout && <div className="dialog-backdrop" role="presentation">
-        <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="logout-dialog-title">
-          <h2 id="logout-dialog-title">Đăng xuất?</h2>
-          <p>Phiên làm việc hiện tại sẽ được đóng trên thiết bị này.</p>
-          <div className="dialog-actions"><button className="button ghost" onClick={() => setConfirmLogout(false)}>Hủy</button><button className="button primary" onClick={confirmSignOut}>Đăng xuất</button></div>
-        </section>
-      </div>}
+      <ConfirmDialog open={confirmLogout || dialog?.type === "prompt-delete"} title={dialog?.type === "prompt-delete" ? `Xóa “${dialog.title}”?` : "Đăng xuất?"} description={dialog?.type === "prompt-delete" ? "Hành động này không thể hoàn tác." : "Phiên làm việc hiện tại sẽ được đóng trên thiết bị này."} confirmLabel={dialog?.type === "prompt-delete" ? "Xóa prompt" : "Đăng xuất"} tone="primary" onCancel={() => { setConfirmLogout(false); setDialog(null); }} onConfirm={dialog?.type === "prompt-delete" ? confirmPromptDelete : confirmSignOut} />
       {pendingPromptId && <div className="dialog-backdrop" role="presentation">
         <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="navigation-dialog-title">
           <h2 id="navigation-dialog-title">Bỏ thay đổi?</h2>
