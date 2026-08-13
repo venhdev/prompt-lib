@@ -2,7 +2,7 @@
   color-scheme: dark;
   --ink: #f1f3f7;
   --muted: #a0a8b6;
-  --subtle: #788291;
+  --subtle: #8791a0;
   --line: #2c3340;
   --line-strong: #414b5c;
   --panel: #171a22;
@@ -28,7 +28,7 @@
   color-scheme: light;
   --ink: #151923;
   --muted: #69707d;
-  --subtle: #9298a2;
+  --subtle: #6f7682;
   --line: #dfe2e7;
   --line-strong: #b9bec8;
   --panel: #ffffff;
@@ -37,7 +37,7 @@
   --canvas: #f4f5f6;
   --accent: #5d4df5;
   --accent-soft: #eeecff;
-  --green: #17885f;
+  --green: #157a56;
   --green-soft: #dff4ea;
   --red: #c84a4a;
   --red-soft: #fff0f0;
@@ -146,11 +146,37 @@ button { color: inherit; }
 .muted { color: var(--subtle); font-weight: 500; margin-left: 4px; }
 .toolbar-right { gap: 12px; color: var(--subtle); font: 400 11px DM Mono, monospace; }
 .tiny-button { display: flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: var(--panel-raised); height: 29px; border-radius: 6px; padding: 0 9px; font-size: 11px; cursor: pointer; }
-.editor-card > .mdxeditor { min-height: 470px; border: 0; border-radius: 0; background: var(--panel); color: var(--ink); }
+.editor-card > .prompt-mdx-editor { min-height: 470px; border: 0; border-radius: 0; background: var(--panel); color: var(--ink);
+  --basePageBg: var(--panel);
+  --baseBase: var(--panel);
+  --baseBgSubtle: var(--panel-raised);
+  --baseBg: var(--panel-raised);
+  --baseBgHover: var(--surface-hover);
+  --baseBgActive: var(--surface-hover);
+  --baseLine: var(--line);
+  --baseBorder: var(--line);
+  --baseBorderHover: var(--line-strong);
+  --baseSolid: var(--ink);
+  --baseSolidHover: var(--ink);
+  --baseText: var(--muted);
+  --baseTextContrast: var(--ink);
+  --accentBase: var(--accent-soft);
+  --accentBgSubtle: var(--accent-soft);
+  --accentBg: var(--accent-soft);
+  --accentBgHover: var(--surface-hover);
+  --accentBgActive: var(--surface-hover);
+  --accentLine: var(--accent);
+  --accentBorder: var(--accent);
+  --accentBorderHover: var(--accent);
+  --accentSolid: var(--accent);
+  --accentSolidHover: var(--accent);
+  --accentText: var(--accent);
+  --accentTextContrast: var(--on-accent);
+}
 .editor-card > .mdxeditor .mdxeditor-toolbar { border-bottom: 1px solid var(--line); background: var(--panel-raised); color: var(--ink); }
-.editor-card > .mdxeditor .mdxeditor-rich-text-editor, .editor-card > .mdxeditor .cm-editor { min-height: 420px; padding: 18px 24px; background: var(--panel); color: var(--ink); }
-.editor-card > .mdxeditor .mdxeditor-rich-text-editor { font-size: 15px; line-height: 1.7; }
-.editor-card > .mdxeditor .cm-editor { font: 400 14px/1.72 DM Mono, monospace; }
+.editor-card > .prompt-mdx-editor .mdxeditor-rich-text-editor, .editor-card > .prompt-mdx-editor .cm-editor { min-height: 420px; padding: 18px 24px; background: var(--panel); color: var(--ink); }
+.editor-card > .prompt-mdx-editor .mdxeditor-rich-text-editor { font-size: 15px; line-height: 1.7; }
+.editor-card > .prompt-mdx-editor .cm-editor { font: 400 14px/1.72 DM Mono, monospace; }
 .editor-card > .mdxeditor [class*="toolbar"] button { color: var(--muted); }
 .editor-card > .mdxeditor [class*="toolbar"] button:hover { background: var(--surface-hover); color: var(--ink); }
 .dialog-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 20px; background: var(--overlay); }
@@ -246,8 +272,8 @@ button { color: inherit; }
   .version-select { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .muted { display: none; }
   .tiny-button { min-width: 67px; height: 34px; }
-  .editor-card > .mdxeditor { min-height: calc(100dvh - 300px); }
-  .editor-card > .mdxeditor .mdxeditor-rich-text-editor, .editor-card > .mdxeditor .cm-editor { min-height: calc(100dvh - 370px); padding: 16px 15px; font-size: 16px; }
+  .editor-card > .prompt-mdx-editor { min-height: calc(100dvh - 300px); }
+  .editor-card > .prompt-mdx-editor .mdxeditor-rich-text-editor, .editor-card > .prompt-mdx-editor .cm-editor { min-height: calc(100dvh - 370px); padding: 16px 15px; font-size: 16px; }
   .prompt-title-heading { font-size: clamp(22px, 7vw, 27px); }
   .prompt-description-text { font-size: 16px; line-height: 1.45; }
   .toolbar-right > span { display: none; }
