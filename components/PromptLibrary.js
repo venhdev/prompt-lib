@@ -37,6 +37,7 @@ import {
   SignOut,
   MagnifyingGlass,
   Plus,
+  PencilSimple,
   SidebarSimple,
   Sparkle,
   Sun,
@@ -98,6 +99,10 @@ function displayTitle(prompt) {
   return prompt.title || deriveTitle(prompt.draftContent) || "Untitled prompt";
 }
 
+function normalizeTagName(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, "-").slice(0, 32);
+}
+
 function normalizePrompts(items) {
   return items.map((prompt) => {
     const versions = (Array.isArray(prompt.versions) ? prompt.versions : []).map((version) => ({
@@ -111,6 +116,8 @@ function normalizePrompts(items) {
       titleAuto: false,
       description: typeof prompt.description === "string" ? prompt.description : "",
       draftContent: typeof prompt.draftContent === "string" ? prompt.draftContent : versions.at(-1)?.content || "",
+      folderId: prompt.folderId || null,
+      tagIds: Array.isArray(prompt.tagIds) ? prompt.tagIds : [],
       updatedAt: prompt.updatedAt || new Date().toISOString(),
       versions,
       localOnly: false,
@@ -160,8 +167,13 @@ function ThemeToggle({ theme, onToggle }) {
 
 export default function PromptLibrary() {
   const [prompts, setPrompts] = useState([]);
+  const [folders, setFolders] = useState([]);
+  const [tags, setTags] = useState([]);
   const [selectedPromptId, setSelectedPromptId] = useState(null);
   const [query, setQuery] = useState("");
+  const [activeFolderId, setActiveFolderId] = useState(null);
+  const [selectedTagIds, setSelectedTagIds] = useState([]);
+  const [tagInput, setTagInput] = useState("");
   const [tab, setTab] = useState("editor");
   const [isEditing, setIsEditing] = useState(false);
   const [pendingPromptId, setPendingPromptId] = useState(null);
@@ -243,6 +255,8 @@ export default function PromptLibrary() {
     setCloudError("");
     setLoadedUserId(null);
     setPrompts([]);
+    setFolders([]);
+    setTags([]);
     setSelectedPromptId(null);
     persistedVersionIdsRef.current = new Set();
     if (!session?.user || !emailVerified || recoveryMode) {
@@ -251,84 +265,56 @@ export default function PromptLibrary() {
     let cancelled = false;
     async function loadCloudLibrary() {
       setNotice("Đang đồng bộ cloud…");
-      const { data, error } = await supabase
-        .from("prompts")
-        .select("id,title,description,draft_content,updated_at,prompt_versions(id,content,position,created_at)")
-        .eq("owner_id", session.user.id)
-        .order("updated_at", { ascending: false });
+      const userId = session.user.id;
+      const [{ data, error }, { data: folderData, error: folderError }, { data: tagData, error: tagError }, { data: relationData, error: relationError }] = await Promise.all([
+        supabase.from("prompts").select("id,title,description,draft_content,folder_id,updated_at,prompt_versions(id,content,position,created_at)").eq("owner_id", userId).order("updated_at", { ascending: false }),
+        supabase.from("folders").select("id,name,position,created_at,updated_at").eq("owner_id", userId).order("position").order("name"),
+        supabase.from("tags").select("id,name,normalized_name,created_at,updated_at").eq("owner_id", userId).order("normalized_name"),
+        supabase.from("prompt_tags").select("prompt_id,tag_id").eq("owner_id", userId),
+      ]);
       if (cancelled) return;
-      if (error) {
+      if (error || folderError || tagError || relationError) {
         setNotice("Không thể tải cloud");
-        setCloudError(error.message);
-        setLoadedUserId(session.user.id);
+        setCloudError((error || folderError || tagError || relationError).message);
+        setLoadedUserId(userId);
         return;
       }
-      if (data?.length) {
-        const cloudPrompts = data.map((prompt) => ({
+      const tagIdsByPrompt = (relationData || []).reduce((result, relation) => {
+        result[relation.prompt_id] = [...(result[relation.prompt_id] || []), relation.tag_id];
+        return result;
+      }, {});
+      setFolders((folderData || []).map((folder) => ({ id: folder.id, name: folder.name, position: folder.position, createdAt: folder.created_at, updatedAt: folder.updated_at })));
+      setTags((tagData || []).map((tag) => ({ id: tag.id, name: tag.name, normalizedName: tag.normalized_name, createdAt: tag.created_at, updatedAt: tag.updated_at })));
+      const cloudPrompts = (data || []).map((prompt) => ({
           id: prompt.id,
           title: prompt.title,
           titleAuto: false,
           description: prompt.description || "",
           draftContent: prompt.draft_content || "",
+          folderId: prompt.folder_id || null,
+          tagIds: tagIdsByPrompt[prompt.id] || [],
           updatedAt: prompt.updated_at,
           localOnly: false,
           versions: [...(prompt.prompt_versions || [])]
             .sort((a, b) => a.position - b.position)
             .map((version) => ({ id: version.id, content: version.content, createdAt: version.created_at })),
         }));
-        let localDraft = null;
-        if (localDraftKey) {
-          try {
-            const storedDraft = JSON.parse(localStorage.getItem(localDraftKey) || "null");
-            if (storedDraft && !String(storedDraft.draftContent || "").trim()) {
-              localDraft = {
-                id: storedDraft.id || newId(),
-                title: "",
-                titleAuto: true,
-                description: typeof storedDraft.description === "string" ? storedDraft.description : "",
-                draftContent: "",
-                updatedAt: storedDraft.updatedAt || new Date().toISOString(),
-                versions: [],
-                localOnly: true,
-              };
-            } else if (storedDraft) {
-              localStorage.removeItem(localDraftKey);
-            }
-          } catch {
-            localStorage.removeItem(localDraftKey);
-          }
-        }
-        const loadedPrompts = localDraft ? [localDraft, ...cloudPrompts] : cloudPrompts;
-        persistedVersionIdsRef.current = new Set(cloudPrompts.flatMap((prompt) => prompt.versions.map((version) => version.id)));
-        setPrompts(loadedPrompts);
-        setSelectedPromptId(loadedPrompts[0]?.id || null);
-      } else {
-        let localDraft = null;
-        if (localDraftKey) {
-          try {
-            const storedDraft = JSON.parse(localStorage.getItem(localDraftKey) || "null");
-            if (storedDraft && !String(storedDraft.draftContent || "").trim()) {
-              localDraft = {
-                id: storedDraft.id || newId(),
-                title: "",
-                titleAuto: true,
-                description: typeof storedDraft.description === "string" ? storedDraft.description : "",
-                draftContent: "",
-                updatedAt: storedDraft.updatedAt || new Date().toISOString(),
-                versions: [],
-                localOnly: true,
-              };
-            } else if (storedDraft) {
-              localStorage.removeItem(localDraftKey);
-            }
-          } catch {
-            localStorage.removeItem(localDraftKey);
-          }
-        }
-        setPrompts(localDraft ? [localDraft] : []);
-        setSelectedPromptId(localDraft?.id || null);
+      let localDraft = null;
+      if (localDraftKey) {
+        try {
+          const storedDraft = JSON.parse(localStorage.getItem(localDraftKey) || "null");
+          if (storedDraft && !String(storedDraft.draftContent || "").trim()) {
+            localDraft = { id: storedDraft.id || newId(), title: "", titleAuto: true, description: typeof storedDraft.description === "string" ? storedDraft.description : "", draftContent: "", folderId: null, tagIds: [], updatedAt: storedDraft.updatedAt || new Date().toISOString(), versions: [], localOnly: true };
+          } else if (storedDraft) localStorage.removeItem(localDraftKey);
+        } catch { localStorage.removeItem(localDraftKey); }
       }
-      setLoadedUserId(session.user.id);
+      const loadedPrompts = localDraft ? [localDraft, ...cloudPrompts] : cloudPrompts;
+      persistedVersionIdsRef.current = new Set(cloudPrompts.flatMap((prompt) => prompt.versions.map((version) => version.id)));
+      setPrompts(loadedPrompts);
+      setSelectedPromptId(loadedPrompts[0]?.id || null);
+      setActiveFolderId(null);
+      setSelectedTagIds([]);
+      setLoadedUserId(userId);
       setCloudReady(true);
       setNotice("Đã đồng bộ cloud");
     }
@@ -374,14 +360,18 @@ export default function PromptLibrary() {
       if (!cloudReady || !session?.user || !emailVerified || recoveryMode || loadedUserId !== session.user.id) return;
       const userId = session.user.id;
       const snapshot = clone(prompts).filter((prompt) => !prompt.localOnly);
+      const folderRows = clone(folders).map((folder, position) => ({ id: folder.id, owner_id: userId, name: folder.name, position, updated_at: folder.updatedAt }));
+      const tagRows = clone(tags).map((tag) => ({ id: tag.id, owner_id: userId, name: tag.name, normalized_name: tag.normalizedName, updated_at: tag.updatedAt }));
       const promptRows = snapshot.map((prompt) => ({
         id: prompt.id,
         owner_id: userId,
         title: prompt.title,
         description: prompt.description,
         draft_content: prompt.draftContent,
+        folder_id: prompt.folderId || null,
         updated_at: prompt.updatedAt,
       }));
+      const relationRows = snapshot.flatMap((prompt) => (prompt.tagIds || []).map((tagId) => ({ owner_id: userId, prompt_id: prompt.id, tag_id: tagId })));
       const versionRows = snapshot.flatMap((prompt) => prompt.versions.map((version, position) => ({
         id: version.id,
         prompt_id: prompt.id,
@@ -391,23 +381,44 @@ export default function PromptLibrary() {
       })));
       syncQueueRef.current = syncQueueRef.current.then(async () => {
         if (activeUserIdRef.current !== userId) return;
-        const { error: promptError } = promptRows.length
+        const { error: folderError } = folderRows.length ? await supabase.from("folders").upsert(folderRows) : { error: null };
+        const { error: tagError } = !folderError && tagRows.length ? await supabase.from("tags").upsert(tagRows) : { error: null };
+        const { error: promptError } = !folderError && !tagError && promptRows.length
           ? await supabase.from("prompts").upsert(promptRows)
           : { error: null };
         const newVersionRows = versionRows.filter((version) => !persistedVersionIdsRef.current.has(version.id));
         const { error: versionError } = !promptError && newVersionRows.length
           ? await supabase.from("prompt_versions").insert(newVersionRows)
           : { error: null };
-        let error = promptError || versionError;
+        let error = folderError || tagError || promptError || versionError;
         if (!promptError && !versionError) {
           newVersionRows.forEach((version) => persistedVersionIdsRef.current.add(version.id));
         }
         if (!error && activeUserIdRef.current === userId) {
           const { data: remotePrompts, error: listError } = await supabase.from("prompts").select("id").eq("owner_id", userId);
           error = listError;
-          const stalePromptIds = (remotePrompts || []).map((row) => row.id).filter((id) => !snapshot.some((prompt) => prompt.id === id));
+          const remotePromptIds = (remotePrompts || []).map((row) => row.id);
+          const { error: relationDeleteError } = remotePromptIds.length ? await supabase.from("prompt_tags").delete().in("prompt_id", remotePromptIds) : { error: null };
+          error = relationDeleteError;
+          const { error: relationInsertError } = !error && relationRows.length ? await supabase.from("prompt_tags").insert(relationRows) : { error: null };
+          error = relationInsertError;
+          const stalePromptIds = remotePromptIds.filter((id) => !snapshot.some((prompt) => prompt.id === id));
           if (!error && stalePromptIds.length) {
             const { error: deleteError } = await supabase.from("prompts").delete().in("id", stalePromptIds);
+            error = deleteError;
+          }
+          const { data: remoteFolders, error: folderListError } = !error ? await supabase.from("folders").select("id").eq("owner_id", userId) : { data: [], error: null };
+          error = folderListError;
+          const staleFolderIds = (remoteFolders || []).map((row) => row.id).filter((id) => !folderRows.some((folder) => folder.id === id));
+          if (!error && staleFolderIds.length) {
+            const { error: deleteError } = await supabase.from("folders").delete().in("id", staleFolderIds);
+            error = deleteError;
+          }
+          const { data: remoteTags, error: tagListError } = !error ? await supabase.from("tags").select("id").eq("owner_id", userId) : { data: [], error: null };
+          error = tagListError;
+          const staleTagIds = (remoteTags || []).map((row) => row.id).filter((id) => !tagRows.some((tag) => tag.id === id));
+          if (!error && staleTagIds.length) {
+            const { error: deleteError } = await supabase.from("tags").delete().in("id", staleTagIds);
             error = deleteError;
           }
         }
@@ -415,7 +426,7 @@ export default function PromptLibrary() {
       });
     }, 350);
     return () => clearTimeout(timer);
-  }, [prompts, cloudReady, loadedUserId, session?.user?.id, emailVerified, recoveryMode]);
+  }, [prompts, folders, tags, cloudReady, loadedUserId, session?.user?.id, emailVerified, recoveryMode]);
 
   function updateAuthField(field, value) {
     setAuthForm((currentForm) => ({ ...currentForm, [field]: value }));
@@ -524,12 +535,22 @@ export default function PromptLibrary() {
 
   const selectedPrompt = prompts.find((prompt) => prompt.id === selectedPromptId) || prompts[0] || null;
   const latestVersion = selectedPrompt?.versions?.at(-1) || null;
-  const filtered = prompts.filter((prompt) => `${prompt.title} ${prompt.description}`.toLowerCase().includes(query.toLowerCase()));
+  const folderById = new Map(folders.map((folder) => [folder.id, folder]));
+  const tagById = new Map(tags.map((tag) => [tag.id, tag]));
+  const filtered = prompts.filter((prompt) => {
+    const searchText = [displayTitle(prompt), prompt.description, folderById.get(prompt.folderId)?.name, ...(prompt.tagIds || []).map((id) => tagById.get(id)?.name)].filter(Boolean).join(" ").toLowerCase();
+    const matchesQuery = !query.trim() || searchText.includes(query.trim().toLowerCase());
+    const matchesFolder = activeFolderId === "__unfiled__" ? !prompt.folderId : !activeFolderId || prompt.folderId === activeFolderId;
+    const matchesTags = !selectedTagIds.length || selectedTagIds.some((id) => (prompt.tagIds || []).includes(id));
+    return matchesQuery && matchesFolder && matchesTags;
+  });
   const hasVersionChanges = Boolean(selectedPrompt && selectedPrompt.draftContent !== latestVersion?.content);
   const hasEditChanges = Boolean(isEditing && selectedPrompt && editSnapshotRef.current && (
     selectedPrompt.title !== editSnapshotRef.current.title
     || selectedPrompt.description !== editSnapshotRef.current.description
     || selectedPrompt.draftContent !== editSnapshotRef.current.draftContent
+    || selectedPrompt.folderId !== editSnapshotRef.current.folderId
+    || JSON.stringify(selectedPrompt.tagIds || []) !== JSON.stringify(editSnapshotRef.current.tagIds || [])
   ));
   const canSaveVersion = Boolean(selectedPrompt?.draftContent.trim() && hasEditChanges);
   const nextVersionNumber = (selectedPrompt?.versions.length || 0) + 1;
@@ -559,6 +580,61 @@ export default function PromptLibrary() {
     setPrompts((items) => items.map((prompt) => prompt.id === selectedPrompt.id
       ? { ...prompt, ...fields, titleAuto: Object.hasOwn(fields, "title") ? false : prompt.titleAuto, updatedAt: new Date().toISOString() }
       : prompt));
+  }
+
+  function createFolder() {
+    const name = window.prompt("Tên folder mới")?.trim();
+    if (!name) return;
+    if (folders.some((folder) => folder.name.toLowerCase() === name.toLowerCase())) return setNotice("Folder đã tồn tại");
+    const now = new Date().toISOString();
+    setFolders((items) => [...items, { id: newId(), name: name.slice(0, 80), position: items.length, createdAt: now, updatedAt: now }]);
+  }
+
+  function renameFolder(folder) {
+    const name = window.prompt("Đổi tên folder", folder.name)?.trim();
+    if (!name || name.toLowerCase() === folder.name.toLowerCase()) return;
+    if (folders.some((item) => item.id !== folder.id && item.name.toLowerCase() === name.toLowerCase())) return setNotice("Folder đã tồn tại");
+    setFolders((items) => items.map((item) => item.id === folder.id ? { ...item, name: name.slice(0, 80), updatedAt: new Date().toISOString() } : item));
+  }
+
+  function deleteFolder(folder) {
+    if (!window.confirm(`Xóa folder “${folder.name}”? Prompt bên trong sẽ chuyển thành Unfiled.`)) return;
+    setFolders((items) => items.filter((item) => item.id !== folder.id));
+    setPrompts((items) => items.map((prompt) => prompt.folderId === folder.id ? { ...prompt, folderId: null, updatedAt: new Date().toISOString() } : prompt));
+    if (activeFolderId === folder.id) setActiveFolderId(null);
+  }
+
+  function toggleTagFilter(tagId) {
+    setSelectedTagIds((ids) => ids.includes(tagId) ? ids.filter((id) => id !== tagId) : [...ids, tagId]);
+  }
+
+  function addTagToPrompt(value = tagInput) {
+    if (!selectedPrompt || !isEditing) return;
+    const normalizedName = normalizeTagName(value);
+    if (!normalizedName) return;
+    const existing = tags.find((tag) => tag.normalizedName === normalizedName);
+    const tag = existing || { id: newId(), name: normalizedName, normalizedName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    if (!existing) setTags((items) => [...items, tag].sort((a, b) => a.normalizedName.localeCompare(b.normalizedName)));
+    if (!(selectedPrompt.tagIds || []).includes(tag.id)) updatePromptDetails({ tagIds: [...(selectedPrompt.tagIds || []), tag.id] });
+    setTagInput("");
+  }
+
+  function removeTagFromPrompt(tagId) {
+    updatePromptDetails({ tagIds: (selectedPrompt?.tagIds || []).filter((id) => id !== tagId) });
+  }
+
+  function renameTag(tag) {
+    const normalizedName = normalizeTagName(window.prompt("Đổi tên tag", tag.name));
+    if (!normalizedName || normalizedName === tag.normalizedName) return;
+    if (tags.some((item) => item.id !== tag.id && item.normalizedName === normalizedName)) return setNotice("Tag đã tồn tại");
+    setTags((items) => items.map((item) => item.id === tag.id ? { ...item, name: normalizedName, normalizedName, updatedAt: new Date().toISOString() } : item));
+  }
+
+  function deleteTag(tag) {
+    if (!window.confirm(`Xóa tag “${tag.name}” khỏi toàn bộ library?`)) return;
+    setTags((items) => items.filter((item) => item.id !== tag.id));
+    setPrompts((items) => items.map((prompt) => (prompt.tagIds || []).includes(tag.id) ? { ...prompt, tagIds: prompt.tagIds.filter((id) => id !== tag.id), updatedAt: new Date().toISOString() } : prompt));
+    setSelectedTagIds((ids) => ids.filter((id) => id !== tag.id));
   }
 
   async function pasteMarkdown() {
@@ -594,11 +670,13 @@ export default function PromptLibrary() {
     if (existingLocalDraft) {
       setSelectedPromptId(existingLocalDraft.id);
       setTab("editor");
-      editSnapshotRef.current = {
+        editSnapshotRef.current = {
         title: existingLocalDraft.title,
         titleAuto: existingLocalDraft.titleAuto,
         description: existingLocalDraft.description,
-        draftContent: existingLocalDraft.draftContent,
+          draftContent: existingLocalDraft.draftContent,
+          folderId: existingLocalDraft.folderId,
+          tagIds: existingLocalDraft.tagIds,
         updatedAt: existingLocalDraft.updatedAt,
         localOnly: existingLocalDraft.localOnly,
       };
@@ -616,6 +694,8 @@ export default function PromptLibrary() {
       draftContent: "",
       updatedAt: new Date().toISOString(),
       versions: [],
+      folderId: null,
+      tagIds: [],
       localOnly: true,
     };
     setPrompts((items) => [prompt, ...items]);
@@ -626,6 +706,8 @@ export default function PromptLibrary() {
       titleAuto: prompt.titleAuto,
       description: prompt.description,
       draftContent: prompt.draftContent,
+      folderId: prompt.folderId,
+      tagIds: prompt.tagIds,
       updatedAt: prompt.updatedAt,
       localOnly: prompt.localOnly,
     };
@@ -657,6 +739,8 @@ export default function PromptLibrary() {
       titleAuto: selectedPrompt.titleAuto,
       description: selectedPrompt.description,
       draftContent: selectedPrompt.draftContent,
+      folderId: selectedPrompt.folderId,
+      tagIds: selectedPrompt.tagIds,
       updatedAt: selectedPrompt.updatedAt,
       localOnly: selectedPrompt.localOnly,
     };
@@ -715,6 +799,8 @@ export default function PromptLibrary() {
       titleAuto: false,
       description: target.description,
       draftContent: target.draftContent,
+      folderId: target.folderId,
+      tagIds: [...(target.tagIds || [])],
       updatedAt: new Date().toISOString(),
       versions: [],
       localOnly: false,
@@ -792,7 +878,20 @@ export default function PromptLibrary() {
   }
 
   function exportData() {
-    const blob = new Blob([JSON.stringify(prompts, null, 2)], { type: "application/json" });
+    const payload = {
+      version: 2,
+      folders: folders.map((folder) => folder.name),
+      tags: tags.map((tag) => tag.name),
+      prompts: prompts.filter((prompt) => !prompt.localOnly).map((prompt) => ({
+        ...prompt,
+        folder: folderById.get(prompt.folderId)?.name || null,
+        tagNames: (prompt.tagIds || []).map((tagId) => tagById.get(tagId)?.name).filter(Boolean),
+        folderId: undefined,
+        tagIds: undefined,
+        localOnly: undefined,
+      })),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -808,13 +907,23 @@ export default function PromptLibrary() {
     reader.onload = () => {
       try {
         const parsed = JSON.parse(reader.result);
-        if (!Array.isArray(parsed) || !parsed.length) throw new Error();
-        const imported = normalizePrompts(parsed).map((prompt) => ({
+        const sourcePrompts = Array.isArray(parsed) ? parsed : parsed.prompts;
+        if (!Array.isArray(sourcePrompts) || !sourcePrompts.length) throw new Error();
+        const now = new Date().toISOString();
+        const importedFolders = [...new Set([...(Array.isArray(parsed.folders) ? parsed.folders : []), ...sourcePrompts.map((prompt) => prompt.folder).filter(Boolean)])].map((name, position) => ({ id: newId(), name: String(name).trim().slice(0, 80), position, createdAt: now, updatedAt: now }));
+        const importedTags = [...new Set([...(Array.isArray(parsed.tags) ? parsed.tags : []), ...sourcePrompts.flatMap((prompt) => prompt.tagNames || prompt.tags || [])].map(normalizeTagName).filter(Boolean))].map((name) => ({ id: newId(), name, normalizedName: name, createdAt: now, updatedAt: now }));
+        const folderIds = new Map(importedFolders.map((folder) => [folder.name.toLowerCase(), folder.id]));
+        const tagIds = new Map(importedTags.map((tag) => [tag.normalizedName, tag.id]));
+        const imported = normalizePrompts(sourcePrompts).map((prompt, index) => ({
           ...prompt,
           id: newId(),
+          folderId: folderIds.get(String(sourcePrompts[index].folder || "").toLowerCase()) || null,
+          tagIds: (sourcePrompts[index].tagNames || sourcePrompts[index].tags || []).map(normalizeTagName).map((name) => tagIds.get(name)).filter(Boolean),
           updatedAt: new Date().toISOString(),
           versions: prompt.versions.map((version) => ({ ...version, id: newId() })),
         }));
+        setFolders((items) => [...items, ...importedFolders]);
+        setTags((items) => [...items, ...importedTags.filter((tag) => !items.some((item) => item.normalizedName === tag.normalizedName))]);
         setPrompts(imported);
         setSelectedPromptId(imported[0].id);
         setNotice("Đã nhập dữ liệu");
@@ -938,6 +1047,16 @@ export default function PromptLibrary() {
           <div className="sidebar-heading"><span>Prompt library</span><span className="count">{prompts.length}</span></div>
           <div className="search"><MagnifyingGlass size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Tìm prompt…" /></div>
           <button className="button primary full" onClick={createPrompt}><Plus size={17} weight="bold" /> Prompt mới</button>
+          <div className="sidebar-section">
+            <div className="sidebar-section-heading"><span>Folders</span><button className="sidebar-add" onClick={createFolder} aria-label="Tạo folder"><Plus size={15} /></button></div>
+            <button className={`sidebar-filter ${!activeFolderId ? "active" : ""}`} onClick={() => setActiveFolderId(null)}>Tất cả prompt <span>{prompts.length}</span></button>
+            <button className={`sidebar-filter ${activeFolderId === "__unfiled__" ? "active" : ""}`} onClick={() => setActiveFolderId("__unfiled__")}>Unfiled <span>{prompts.filter((prompt) => !prompt.folderId).length}</span></button>
+            {folders.map((folder) => <div className="sidebar-filter-row" key={folder.id}><button className={`sidebar-filter ${activeFolderId === folder.id ? "active" : ""}`} onClick={() => setActiveFolderId(folder.id)}>{folder.name}<span>{prompts.filter((prompt) => prompt.folderId === folder.id).length}</span></button><button className="sidebar-mini-action" onClick={() => renameFolder(folder)} aria-label={`Đổi tên ${folder.name}`}><PencilSimple size={13} /></button><button className="sidebar-mini-action danger" onClick={() => deleteFolder(folder)} aria-label={`Xóa ${folder.name}`}><Trash size={13} /></button></div>)}
+          </div>
+          <div className="sidebar-section">
+            <div className="sidebar-section-heading"><span>Tags</span><span className="count">{tags.length}</span></div>
+            {tags.map((tag) => <div className="sidebar-filter-row" key={tag.id}><button className={`sidebar-filter ${selectedTagIds.includes(tag.id) ? "active" : ""}`} onClick={() => toggleTagFilter(tag.id)}>#{tag.name}<span>{prompts.filter((prompt) => (prompt.tagIds || []).includes(tag.id)).length}</span></button><button className="sidebar-mini-action" onClick={() => renameTag(tag)} aria-label={`Đổi tên tag ${tag.name}`}><PencilSimple size={13} /></button><button className="sidebar-mini-action danger" onClick={() => deleteTag(tag)} aria-label={`Xóa tag ${tag.name}`}><Trash size={13} /></button></div>)}
+          </div>
           <div className="prompt-list">
             {filtered.map((prompt) => (
               <div
@@ -990,6 +1109,10 @@ export default function PromptLibrary() {
                 <h1 className="prompt-title-heading">{displayTitle(selectedPrompt)}</h1>
                 <p className="prompt-description-text">{selectedPrompt.description || "Chưa có mô tả"}</p>
               </>}
+              <div className="prompt-metadata">
+                {isEditing ? <select className="metadata-select" value={selectedPrompt.folderId || ""} onChange={(e) => updatePromptDetails({ folderId: e.target.value || null })}><option value="">Unfiled</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select> : selectedPrompt.folderId && <span className="metadata-folder"><FolderSimple size={14} /> {folderById.get(selectedPrompt.folderId)?.name}</span>}
+                <div className="tag-chips">{(selectedPrompt.tagIds || []).map((tagId) => { const tag = tagById.get(tagId); return tag ? <span className="tag-chip" key={tag.id}>#{tag.name}{isEditing && <button onClick={() => removeTagFromPrompt(tag.id)} aria-label={`Xóa tag ${tag.name}`}><X size={12} /></button>}</span> : null; })}{isEditing && <input className="tag-input" value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTagToPrompt(); } }} placeholder="Thêm tag…" aria-label="Thêm tag" />}</div>
+              </div>
             </div>
             <div className="header-actions">
               <button className="icon-button" onClick={() => duplicatePrompt(selectedPrompt)} disabled={!selectedPrompt.draftContent.trim()} title="Duplicate" aria-label="Nhân bản prompt"><Copy size={17} /></button>
