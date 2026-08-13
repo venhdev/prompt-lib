@@ -164,11 +164,8 @@ export default function PromptLibrary() {
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState("editor");
   const [isEditing, setIsEditing] = useState(false);
-  const [confirmDuplicate, setConfirmDuplicate] = useState(false);
-  const [duplicateTargetId, setDuplicateTargetId] = useState(null);
   const [pendingPromptId, setPendingPromptId] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
-  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [compareA, setCompareA] = useState(null);
@@ -647,7 +644,6 @@ export default function PromptLibrary() {
       return;
     }
     setContextMenu(null);
-    setDeleteConfirmId(null);
     editSnapshotRef.current = null;
     setIsEditing(false);
     setSelectedPromptId(id);
@@ -690,7 +686,6 @@ export default function PromptLibrary() {
     setIsEditing(false);
     setPendingPromptId(null);
     setContextMenu(null);
-    setDeleteConfirmId(null);
     if (nextPromptId === "__new__") {
       createPromptNow();
       return;
@@ -711,15 +706,8 @@ export default function PromptLibrary() {
     setNotice(`Đã lưu v${nextVersionNumber}`);
   }
 
-  function requestDuplicatePrompt(prompt = selectedPrompt) {
-    if (!prompt || prompt.localOnly || !prompt.draftContent.trim()) return;
-    setContextMenu(null);
-    setDuplicateTargetId(prompt.id);
-    setConfirmDuplicate(true);
-  }
-
-  function confirmDuplicatePrompt() {
-    const target = prompts.find((prompt) => prompt.id === duplicateTargetId);
+  function duplicatePrompt(prompt = selectedPrompt) {
+    const target = prompt;
     if (!target || target.localOnly || !target.draftContent.trim()) return;
     const copy = {
       id: newId(),
@@ -736,8 +724,7 @@ export default function PromptLibrary() {
     setTab("editor");
     editSnapshotRef.current = null;
     setIsEditing(false);
-    setConfirmDuplicate(false);
-    setDuplicateTargetId(null);
+    setContextMenu(null);
     setNotice("Đã nhân bản draft");
   }
 
@@ -772,12 +759,11 @@ export default function PromptLibrary() {
   }
 
   function requestDeletePrompt(promptId) {
-    setContextMenu(null);
-    setDeleteConfirmId(promptId);
+    setContextMenu((current) => current?.promptId === promptId ? { ...current, deleteConfirm: true } : current);
   }
 
   function cancelDeletePrompt() {
-    setDeleteConfirmId(null);
+    setContextMenu((current) => current ? { ...current, deleteConfirm: false } : null);
   }
 
   function confirmDeletePrompt(promptId) {
@@ -785,7 +771,7 @@ export default function PromptLibrary() {
     if (!target) return;
     const next = prompts.filter((prompt) => prompt.id !== promptId);
     setPrompts(next);
-    setDeleteConfirmId(null);
+    setContextMenu(null);
     if (selectedPromptId === promptId) {
       editSnapshotRef.current = null;
       setIsEditing(false);
@@ -956,20 +942,15 @@ export default function PromptLibrary() {
             {filtered.map((prompt) => (
               <div
                 key={prompt.id}
-                className={`prompt-card ${prompt.id === selectedPrompt?.id ? "active" : ""} ${deleteConfirmId === prompt.id ? "deleting" : ""}`}
+                className={`prompt-card ${prompt.id === selectedPrompt?.id ? "active" : ""}`}
                 onContextMenu={(event) => openPromptMenu(event, prompt.id)}
               >
-                {deleteConfirmId === prompt.id ? <div className="prompt-delete-confirm">
-                  <strong>Delete?</strong>
-                  <div><button className="prompt-inline-action cancel" onClick={cancelDeletePrompt} aria-label="Hủy xóa"><X size={16} /></button><button className="prompt-inline-action danger" onClick={() => confirmDeletePrompt(prompt.id)} aria-label="Xác nhận xóa"><Trash size={16} /></button></div>
-                </div> : <>
-                  <button className="prompt-card-main" onClick={() => selectPrompt(prompt.id)}>
-                    <div className="prompt-title"><FolderSimple size={17} weight={prompt.id === selectedPrompt?.id ? "fill" : "regular"} /><strong>{displayTitle(prompt)}</strong></div>
-                    <p>{prompt.description || (prompt.localOnly ? "Draft local · Chưa có nội dung" : "Chưa có mô tả")}</p>
-                    <div className="card-meta"><span>{prompt.localOnly ? "Draft local" : `${prompt.versions.length} versions`}</span><span>{formatRelativeTime(prompt.updatedAt)}</span></div>
-                  </button>
-                  <button className="prompt-menu-trigger" onClick={(event) => openPromptMenu(event, prompt.id)} aria-label={`Mở actions cho ${displayTitle(prompt)}`} title="Actions"><DotsThreeVertical size={18} /></button>
-                </>}
+                <button className="prompt-card-main" onClick={() => selectPrompt(prompt.id)}>
+                  <div className="prompt-title"><FolderSimple size={17} weight={prompt.id === selectedPrompt?.id ? "fill" : "regular"} /><strong>{displayTitle(prompt)}</strong></div>
+                  <p>{prompt.description || (prompt.localOnly ? "Draft local · Chưa có nội dung" : "Chưa có mô tả")}</p>
+                  <div className="card-meta"><span>{prompt.localOnly ? "Draft local" : `${prompt.versions.length} versions`}</span><span>{formatRelativeTime(prompt.updatedAt)}</span></div>
+                </button>
+                <button className="prompt-menu-trigger" onClick={(event) => openPromptMenu(event, prompt.id)} aria-label={`Mở actions cho ${displayTitle(prompt)}`} title="Actions"><DotsThreeVertical size={18} /></button>
               </div>
             ))}
           </div>
@@ -978,8 +959,11 @@ export default function PromptLibrary() {
             if (!prompt) return null;
             return <div className="prompt-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()} role="menu">
               <button onClick={() => copyLatestVersion(prompt)} disabled={!prompt.versions.at(-1)} role="menuitem"><Copy size={16} /> Copy latest version</button>
-              <button onClick={() => requestDuplicatePrompt(prompt)} disabled={prompt.localOnly || !prompt.draftContent.trim()} role="menuitem"><Copy size={16} /> Duplicate</button>
-              <button className="danger" onClick={() => requestDeletePrompt(prompt.id)} role="menuitem"><Trash size={16} /> Delete</button>
+              <button onClick={() => duplicatePrompt(prompt)} disabled={prompt.localOnly || !prompt.draftContent.trim()} role="menuitem"><Copy size={16} /> Duplicate</button>
+              {contextMenu.deleteConfirm ? <div className="prompt-context-delete" role="menuitem">
+                <strong>Delete?</strong>
+                <div><button className="prompt-inline-action cancel" onClick={cancelDeletePrompt} aria-label="Hủy xóa"><X size={16} /></button><button className="prompt-inline-action danger" onClick={() => confirmDeletePrompt(prompt.id)} aria-label="Xác nhận xóa"><Trash size={16} /></button></div>
+              </div> : <button className="danger" onClick={() => requestDeletePrompt(prompt.id)} role="menuitem"><Trash size={16} /> Delete</button>}
             </div>;
           })()}
           <div className="sidebar-footer">
@@ -1008,7 +992,7 @@ export default function PromptLibrary() {
               </>}
             </div>
             <div className="header-actions">
-              <button className="icon-button" onClick={() => requestDuplicatePrompt(selectedPrompt)} disabled={!selectedPrompt.draftContent.trim()} title="Duplicate" aria-label="Nhân bản prompt"><Copy size={17} /></button>
+              <button className="icon-button" onClick={() => duplicatePrompt(selectedPrompt)} disabled={!selectedPrompt.draftContent.trim()} title="Duplicate" aria-label="Nhân bản prompt"><Copy size={17} /></button>
               <button className="icon-button danger" onClick={deletePrompt} title="Delete" aria-label="Xóa prompt"><Trash size={17} /></button>
               {isEditing ? <><button className="button ghost edit-cancel" onClick={cancelEditing}>{hasEditChanges ? "Bỏ thay đổi" : "Hủy"}</button><button className="button primary" onClick={saveVersion} disabled={!canSaveVersion} title={!selectedPrompt.draftContent.trim() ? "Nhập nội dung trước khi lưu version" : hasEditChanges ? saveVersionLabel : "Chưa có thay đổi"}><GitBranch size={17} /> {saveVersionLabel}</button></> : <button className="button primary" onClick={beginEditing}><Key size={17} /> Chỉnh sửa</button>}
             </div>
@@ -1073,13 +1057,6 @@ export default function PromptLibrary() {
           <h2 id="logout-dialog-title">Đăng xuất?</h2>
           <p>Phiên làm việc hiện tại sẽ được đóng trên thiết bị này.</p>
           <div className="dialog-actions"><button className="button ghost" onClick={() => setConfirmLogout(false)}>Hủy</button><button className="button primary" onClick={confirmSignOut}>Đăng xuất</button></div>
-        </section>
-      </div>}
-      {confirmDuplicate && <div className="dialog-backdrop" role="presentation">
-        <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="duplicate-dialog-title">
-          <h2 id="duplicate-dialog-title">Nhân bản prompt?</h2>
-          <p>Một prompt mới sẽ được tạo từ nội dung hiện tại. Version history không được sao chép.</p>
-          <div className="dialog-actions"><button className="button ghost" onClick={() => { setConfirmDuplicate(false); setDuplicateTargetId(null); }}>Hủy</button><button className="button primary" onClick={confirmDuplicatePrompt}>Nhân bản</button></div>
         </section>
       </div>}
       {pendingPromptId && <div className="dialog-backdrop" role="presentation">

@@ -122,9 +122,8 @@ button { color: inherit; }
 .prompt-menu-trigger { position: absolute; top: 8px; right: 7px; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--subtle); cursor: pointer; opacity: 0; }
 .prompt-card:hover .prompt-menu-trigger, .prompt-menu-trigger:focus-visible { opacity: 1; }
 .prompt-menu-trigger:hover { background: var(--surface-hover); color: var(--ink); }
-.prompt-card.deleting { padding: 11px; }
-.prompt-delete-confirm { min-height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px; color: var(--red); }
-.prompt-delete-confirm > div { display: flex; gap: 5px; }
+.prompt-context-delete { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 5px 5px 10px; color: var(--red); font-size: 12px; }
+.prompt-context-delete > div { display: flex; gap: 5px; }
 .prompt-inline-action { width: 29px; height: 29px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-raised); color: var(--muted); cursor: pointer; }
 .prompt-inline-action:hover { color: var(--ink); background: var(--surface-hover); }
 .prompt-inline-action.danger:hover { border-color: var(--red); background: var(--red-soft); color: var(--red); }
@@ -271,7 +270,6 @@ button { color: inherit; }
   .prompt-card { padding: 0; }
   .prompt-card-main { padding: 13px 42px 13px 11px; }
   .prompt-menu-trigger { top: 12px; right: 9px; width: 34px; height: 34px; opacity: 1; }
-  .prompt-card.deleting { padding: 13px 11px; }
   .button.full { height: 44px; }
   .main-panel { padding: 18px 14px max(30px, env(safe-area-inset-bottom)); }
   .prompt-header { align-items: stretch; flex-direction: column; gap: 14px; }
