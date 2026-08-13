@@ -39,14 +39,46 @@ function newId() {
 }
 
 function normalizePrompts(items) {
-  return items.map((prompt) => ({
-    id: prompt.id,
-    title: prompt.title,
-    description: prompt.description,
-    tags: prompt.tags,
-    updated: prompt.updated,
-    versions: prompt.versions,
-  }));
+  return items.map((prompt) => {
+    const versions = (Array.isArray(prompt.versions) ? prompt.versions : []).map((version) => ({
+      id: version.id,
+      content: typeof version.content === "string" ? version.content : "",
+      createdAt: version.createdAt || new Date().toISOString(),
+    }));
+    return {
+      id: prompt.id,
+      title: typeof prompt.title === "string" ? prompt.title : "",
+      description: typeof prompt.description === "string" ? prompt.description : "",
+      draftContent: typeof prompt.draftContent === "string" ? prompt.draftContent : versions.at(-1)?.content || "",
+      updatedAt: prompt.updatedAt || new Date().toISOString(),
+      versions,
+    };
+  });
+}
+
+function formatTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Vừa xong";
+  return new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function formatRelativeTime(value) {
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return "Vừa xong";
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
+  if (elapsedMinutes < 1) return "Vừa xong";
+  if (elapsedMinutes < 60) return `${elapsedMinutes} phút trước`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours} giờ trước`;
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  if (elapsedDays < 7) return `${elapsedDays} ngày trước`;
+  return new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" }).format(timestamp);
 }
 
 function ThemeToggle({ theme, onToggle }) {
@@ -66,7 +98,7 @@ function ThemeToggle({ theme, onToggle }) {
 
 export default function PromptLibrary() {
   const [prompts, setPrompts] = useState([]);
-  const [activeId, setActiveId] = useState(null);
+  const [selectedPromptId, setSelectedPromptId] = useState(null);
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState("editor");
   const [compareA, setCompareA] = useState(null);
@@ -89,6 +121,7 @@ export default function PromptLibrary() {
   });
   const [authForm, setAuthForm] = useState({ username: "", email: "", password: "", otp: "", newPassword: "" });
   const activeUserIdRef = useRef(null);
+  const persistedVersionIdsRef = useRef(new Set());
   const syncQueueRef = useRef(Promise.resolve());
 
   const emailVerified = Boolean(session?.user?.email_confirmed_at);
@@ -138,7 +171,8 @@ export default function PromptLibrary() {
     setCloudError("");
     setLoadedUserId(null);
     setPrompts([]);
-    setActiveId(null);
+    setSelectedPromptId(null);
+    persistedVersionIdsRef.current = new Set();
     if (!session?.user || !emailVerified || recoveryMode) {
       return;
     }
@@ -147,7 +181,8 @@ export default function PromptLibrary() {
       setNotice("Đang đồng bộ cloud…");
       const { data, error } = await supabase
         .from("prompts")
-        .select("id,title,description,tags,updated_label,prompt_versions(id,name,note,created_label,content,position)")
+        .select("id,title,description,draft_content,updated_at,prompt_versions(id,content,position,created_at)")
+        .eq("owner_id", session.user.id)
         .order("updated_at", { ascending: false });
       if (cancelled) return;
       if (error) {
@@ -161,17 +196,18 @@ export default function PromptLibrary() {
           id: prompt.id,
           title: prompt.title,
           description: prompt.description || "",
-          tags: prompt.tags || [],
-          updated: prompt.updated_label || "vừa xong",
-          versions: [...prompt.prompt_versions]
+          draftContent: prompt.draft_content || "",
+          updatedAt: prompt.updated_at,
+          versions: [...(prompt.prompt_versions || [])]
             .sort((a, b) => a.position - b.position)
-            .map((version) => ({ id: version.id, name: version.name, note: version.note || "", created: version.created_label || "Bây giờ", content: version.content })),
+            .map((version) => ({ id: version.id, content: version.content, createdAt: version.created_at })),
         }));
+        persistedVersionIdsRef.current = new Set(cloudPrompts.flatMap((prompt) => prompt.versions.map((version) => version.id)));
         setPrompts(cloudPrompts);
-        setActiveId(cloudPrompts[0].id);
+        setSelectedPromptId(cloudPrompts[0].id);
       } else {
         setPrompts([]);
-        setActiveId(null);
+        setSelectedPromptId(null);
       }
       setLoadedUserId(session.user.id);
       setCloudReady(true);
@@ -191,29 +227,31 @@ export default function PromptLibrary() {
         owner_id: userId,
         title: prompt.title,
         description: prompt.description,
-        tags: prompt.tags,
-        updated_label: prompt.updated,
+        draft_content: prompt.draftContent,
+        updated_at: prompt.updatedAt,
       }));
       const versionRows = snapshot.flatMap((prompt) => prompt.versions.map((version, position) => ({
         id: version.id,
         prompt_id: prompt.id,
-        name: version.name,
-        note: version.note,
-        created_label: version.created,
         content: version.content,
-        position,
+        position: position + 1,
+        created_at: version.createdAt,
       })));
       syncQueueRef.current = syncQueueRef.current.then(async () => {
         if (activeUserIdRef.current !== userId) return;
         const { error: promptError } = promptRows.length
           ? await supabase.from("prompts").upsert(promptRows)
           : { error: null };
-        const { error: versionError } = !promptError && versionRows.length
-          ? await supabase.from("prompt_versions").upsert(versionRows)
+        const newVersionRows = versionRows.filter((version) => !persistedVersionIdsRef.current.has(version.id));
+        const { error: versionError } = !promptError && newVersionRows.length
+          ? await supabase.from("prompt_versions").insert(newVersionRows)
           : { error: null };
         let error = promptError || versionError;
+        if (!promptError && !versionError) {
+          newVersionRows.forEach((version) => persistedVersionIdsRef.current.add(version.id));
+        }
         if (!error && activeUserIdRef.current === userId) {
-          const { data: remotePrompts, error: listError } = await supabase.from("prompts").select("id");
+          const { data: remotePrompts, error: listError } = await supabase.from("prompts").select("id").eq("owner_id", userId);
           error = listError;
           const stalePromptIds = (remotePrompts || []).map((row) => row.id).filter((id) => !snapshot.some((prompt) => prompt.id === id));
           if (!error && stalePromptIds.length) {
@@ -322,65 +360,90 @@ export default function PromptLibrary() {
     setLoginNotice(error ? error.message : "Đăng nhập thành công.");
   }
 
-  const active = prompts.find((prompt) => prompt.id === activeId) || prompts[0] || null;
-  const current = active?.versions?.[active.versions.length - 1] || null;
-  const filtered = prompts.filter((prompt) => `${prompt.title} ${prompt.tags.join(" ")}`.toLowerCase().includes(query.toLowerCase()));
+  const selectedPrompt = prompts.find((prompt) => prompt.id === selectedPromptId) || prompts[0] || null;
+  const latestVersion = selectedPrompt?.versions?.at(-1) || null;
+  const filtered = prompts.filter((prompt) => `${prompt.title} ${prompt.description}`.toLowerCase().includes(query.toLowerCase()));
+  const hasVersionChanges = Boolean(selectedPrompt && selectedPrompt.draftContent !== latestVersion?.content);
+  const canSaveVersion = Boolean(selectedPrompt?.draftContent.trim() && hasVersionChanges);
+  const nextVersionNumber = (selectedPrompt?.versions.length || 0) + 1;
+  const saveVersionLabel = latestVersion && !hasVersionChanges ? "Không có thay đổi" : `Lưu thành v${nextVersionNumber}`;
 
   useEffect(() => {
-    if (!active) return;
-    setCompareA(active.versions[Math.max(0, active.versions.length - 2)]?.id);
-    setCompareB(active.versions[active.versions.length - 1]?.id);
-  }, [activeId]);
+    if (!selectedPrompt) return;
+    setCompareA(selectedPrompt.versions[Math.max(0, selectedPrompt.versions.length - 2)]?.id || null);
+    setCompareB(selectedPrompt.versions.at(-1)?.id || null);
+  }, [selectedPromptId, selectedPrompt?.versions.length]);
 
-  function updateCurrent(content) {
+  function updateDraft(content) {
+    if (!selectedPrompt) return;
     setNotice("Đang lưu…");
-    setPrompts((items) => items.map((prompt) => prompt.id !== active.id ? prompt : {
+    setPrompts((items) => items.map((prompt) => prompt.id !== selectedPrompt.id ? prompt : {
       ...prompt,
-      versions: prompt.versions.map((version) => version.id === current.id ? { ...version, content } : version),
-      updated: "vừa xong",
+      draftContent: content,
+      updatedAt: new Date().toISOString(),
     }));
+  }
+
+  function updatePromptDetails(fields) {
+    if (!selectedPrompt) return;
+    setNotice("Đang lưu…");
+    setPrompts((items) => items.map((prompt) => prompt.id === selectedPrompt.id
+      ? { ...prompt, ...fields, updatedAt: new Date().toISOString() }
+      : prompt));
   }
 
   function createPrompt() {
     const id = newId();
     const prompt = {
       id,
-      title: "Untitled prompt",
-      description: "Mô tả mục tiêu của prompt.",
-      tags: ["Draft"],
-      updated: "vừa xong",
-      versions: [{ id: newId(), name: "v1 — Draft", note: "Initial draft", created: "Bây giờ", content: "Describe the role, goal, constraints, and expected output." }],
+      title: "",
+      description: "",
+      draftContent: "",
+      updatedAt: new Date().toISOString(),
+      versions: [],
     };
     setPrompts((items) => [prompt, ...items]);
-    setActiveId(id);
+    setSelectedPromptId(id);
+    setTab("editor");
     setSidebarOpen(false);
+    setNotice("Draft mới đã tạo");
   }
 
   function selectPrompt(id) {
-    setActiveId(id);
+    setSelectedPromptId(id);
     setSidebarOpen(false);
   }
 
   function saveVersion() {
-    const version = { ...current, id: newId(), name: `v${active.versions.length + 1} — Current`, note: "Manual checkpoint", created: "Bây giờ" };
-    setPrompts((items) => items.map((prompt) => prompt.id === active.id ? { ...prompt, versions: [...prompt.versions, version], updated: "vừa xong" } : prompt));
-    setNotice("Đã tạo version mới");
+    if (!selectedPrompt || !canSaveVersion) return;
+    const version = { id: newId(), content: selectedPrompt.draftContent, createdAt: new Date().toISOString() };
+    setPrompts((items) => items.map((prompt) => prompt.id === selectedPrompt.id
+      ? { ...prompt, versions: [...prompt.versions, version], updatedAt: new Date().toISOString() }
+      : prompt));
+    setNotice(`Đã lưu v${nextVersionNumber}`);
   }
 
   function duplicatePrompt() {
-    const copy = clone(active);
-    copy.id = newId();
-    copy.title = `${active.title} copy`;
-    copy.updated = "vừa xong";
-    copy.versions = copy.versions.map((version) => ({ ...version, id: newId() }));
+    if (!selectedPrompt) return;
+    const copy = {
+      id: newId(),
+      title: `${selectedPrompt.title || "Untitled prompt"} copy`,
+      description: selectedPrompt.description,
+      draftContent: selectedPrompt.draftContent,
+      updatedAt: new Date().toISOString(),
+      versions: [],
+    };
     setPrompts((items) => [copy, ...items]);
-    setActiveId(copy.id);
+    setSelectedPromptId(copy.id);
+    setNotice("Đã nhân bản draft");
   }
 
   function deletePrompt() {
-    const next = prompts.filter((prompt) => prompt.id !== active.id);
+    if (!selectedPrompt || !window.confirm(`Xóa prompt “${selectedPrompt.title || "Untitled prompt"}”? Hành động này không thể hoàn tác.`)) return;
+    const next = prompts.filter((prompt) => prompt.id !== selectedPrompt.id);
     setPrompts(next);
-    setActiveId(next[0]?.id || null);
+    setSelectedPromptId(next[0]?.id || null);
+    setNotice("Đã xóa prompt");
   }
 
   function exportData() {
@@ -404,18 +467,19 @@ export default function PromptLibrary() {
         const imported = normalizePrompts(parsed).map((prompt) => ({
           ...prompt,
           id: newId(),
+          updatedAt: new Date().toISOString(),
           versions: prompt.versions.map((version) => ({ ...version, id: newId() })),
         }));
         setPrompts(imported);
-        setActiveId(imported[0].id);
+        setSelectedPromptId(imported[0].id);
         setNotice("Đã nhập dữ liệu");
       } catch { setNotice("File không hợp lệ"); }
     };
     reader.readAsText(file);
   }
 
-  const versionA = active?.versions.find((version) => version.id === compareA) || active?.versions[0] || null;
-  const versionB = active?.versions.find((version) => version.id === compareB) || current;
+  const versionA = selectedPrompt?.versions.find((version) => version.id === compareA) || selectedPrompt?.versions[0] || null;
+  const versionB = selectedPrompt?.versions.find((version) => version.id === compareB) || latestVersion;
   const changedLines = useMemo(() => {
     const a = versionA?.content.split("\n") || [];
     const b = versionB?.content.split("\n") || [];
@@ -522,10 +586,10 @@ export default function PromptLibrary() {
           <button className="button primary full" onClick={createPrompt}><Plus size={17} weight="bold" /> Prompt mới</button>
           <div className="prompt-list">
             {filtered.map((prompt) => (
-              <button key={prompt.id} className={`prompt-card ${prompt.id === active?.id ? "active" : ""}`} onClick={() => selectPrompt(prompt.id)}>
-                <div className="prompt-title"><FolderSimple size={17} weight={prompt.id === active?.id ? "fill" : "regular"} /><strong>{prompt.title}</strong></div>
-                <p>{prompt.description}</p>
-                <div className="card-meta"><span>{prompt.versions.length} versions</span><span>{prompt.updated}</span></div>
+              <button key={prompt.id} className={`prompt-card ${prompt.id === selectedPrompt?.id ? "active" : ""}`} onClick={() => selectPrompt(prompt.id)}>
+                <div className="prompt-title"><FolderSimple size={17} weight={prompt.id === selectedPrompt?.id ? "fill" : "regular"} /><strong>{prompt.title || "Untitled prompt"}</strong></div>
+                <p>{prompt.description || "Chưa có mô tả"}</p>
+                <div className="card-meta"><span>{prompt.versions.length} versions</span><span>{formatRelativeTime(prompt.updatedAt)}</span></div>
               </button>
             ))}
           </div>
@@ -536,7 +600,7 @@ export default function PromptLibrary() {
         </aside>
 
         <section className="main-panel">
-          {!active ? (
+          {!selectedPrompt ? (
             <div className="empty-state">
               <div className="brand-mark"><Sparkle size={22} weight="fill" /></div>
               <h2>Thư viện đang trống</h2>
@@ -546,14 +610,14 @@ export default function PromptLibrary() {
           ) : <>
           <div className="prompt-header">
             <div className="title-area">
-              <div className="eyebrow">PROMPT / {active.tags[0]?.toUpperCase() || "UNTAGGED"}</div>
-              <input className="title-input" value={active.title} onChange={(e) => setPrompts((items) => items.map((p) => p.id === active.id ? { ...p, title: e.target.value } : p))} />
-              <input className="description-input" value={active.description} onChange={(e) => setPrompts((items) => items.map((p) => p.id === active.id ? { ...p, description: e.target.value } : p))} />
+              <div className="eyebrow">PROMPT EDITOR</div>
+              <input className="title-input" value={selectedPrompt.title} onChange={(e) => updatePromptDetails({ title: e.target.value })} placeholder="Untitled prompt" aria-label="Tên prompt" />
+              <input className="description-input" value={selectedPrompt.description} onChange={(e) => updatePromptDetails({ description: e.target.value })} placeholder="Mô tả mục tiêu của prompt…" aria-label="Mô tả prompt" />
             </div>
             <div className="header-actions">
               <button className="icon-button" onClick={duplicatePrompt} title="Duplicate" aria-label="Nhân bản prompt"><Copy size={17} /></button>
               <button className="icon-button danger" onClick={deletePrompt} title="Delete" aria-label="Xóa prompt"><Trash size={17} /></button>
-              <button className="button dark" onClick={saveVersion}><GitBranch size={17} /> Lưu version</button>
+              <button className="button dark" onClick={saveVersion} disabled={!canSaveVersion} title={!selectedPrompt.draftContent.trim() ? "Nhập nội dung trước khi lưu version" : saveVersionLabel}><GitBranch size={17} /> {saveVersionLabel}</button>
             </div>
           </div>
 
@@ -566,21 +630,26 @@ export default function PromptLibrary() {
             <div className="editor-layout">
               <div className="editor-card">
                 <div className="card-toolbar">
-                  <div className="version-select"><span className="status-dot" />{current.name}<span className="muted">• {current.created}</span></div>
-                  <div className="toolbar-right"><span>{current.content.length} chars</span><button className="tiny-button" onClick={() => navigator.clipboard.writeText(current.content)}><Copy size={14} /> Copy</button></div>
+                  <div className="version-select"><span className={`status-dot ${hasVersionChanges ? "dirty" : ""}`} />Working draft<span className="muted">• {hasVersionChanges ? "Có thay đổi mới" : latestVersion ? `Khớp v${selectedPrompt.versions.length}` : "Chưa có version"}</span></div>
+                  <div className="toolbar-right"><span>{selectedPrompt.draftContent.length} chars</span><button className="tiny-button" onClick={() => navigator.clipboard.writeText(selectedPrompt.draftContent)}><Copy size={14} /> Copy</button></div>
                 </div>
-                <textarea className="prompt-editor" value={current.content} onChange={(e) => updateCurrent(e.target.value)} spellCheck="false" />
-                <div className="editor-footer"><span><CheckCircle size={15} weight="fill" /> Version hiện tại</span><span>Plain text · UTF-8</span></div>
+                <textarea className="prompt-editor" value={selectedPrompt.draftContent} onChange={(e) => updateDraft(e.target.value)} placeholder="Describe the role, goal, constraints, and expected output…" spellCheck="false" aria-label="Nội dung working draft" />
+                <div className="editor-footer"><span><CheckCircle size={15} weight="fill" /> Draft đã tự động lưu</span><span>Plain text · UTF-8</span></div>
               </div>
               <aside className="version-rail">
                 <div className="rail-title"><span>Version history</span><Clock size={16} /></div>
                 <div className="timeline">
-                  {[...active.versions].reverse().map((version, index) => (
-                    <button key={version.id} className={index === 0 ? "version-item current" : "version-item"} onClick={() => { setCompareA(version.id); setCompareB(current.id); setTab("compare"); }}>
-                      <span className="timeline-dot" />
-                      <div><strong>{version.name}</strong><span>{version.note}</span><small>{version.created}</small></div>
-                    </button>
-                  ))}
+                  {!selectedPrompt.versions.length ? (
+                    <div className="timeline-empty"><strong>Chưa có version</strong><span>Chỉnh draft rồi chọn “Lưu thành v1”.</span></div>
+                  ) : [...selectedPrompt.versions].reverse().map((version, index) => {
+                    const versionNumber = selectedPrompt.versions.length - index;
+                    return (
+                      <button key={version.id} className={index === 0 ? "version-item current" : "version-item"} onClick={() => { setCompareA(version.id === latestVersion.id ? selectedPrompt.versions.at(-2)?.id || version.id : version.id); setCompareB(latestVersion.id); setTab("compare"); }}>
+                        <span className="timeline-dot" />
+                        <div><strong>v{versionNumber}{index === 0 && <span className="latest-badge">Latest</span>}</strong><span>Immutable snapshot</span><small>{formatTimestamp(version.createdAt)}</small></div>
+                      </button>
+                    );
+                  })}
                 </div>
               </aside>
             </div>
@@ -588,15 +657,19 @@ export default function PromptLibrary() {
 
           {tab === "compare" && (
             <div className="compare-view">
-              <div className="compare-summary"><div><ArrowsLeftRight size={18} /><strong>{changedLines} dòng thay đổi</strong><span>So sánh nội dung giữa hai version</span></div><button className="button ghost" onClick={() => { const temp = compareA; setCompareA(compareB); setCompareB(temp); }}><ArrowClockwise size={16} /> Đổi bên</button></div>
-              <div className="diff-grid">
-                {[{ side: "A", version: versionA, setter: setCompareA }, { side: "B", version: versionB, setter: setCompareB }].map(({ side, version, setter }) => (
-                  <div className="diff-card" key={side}>
-                    <div className="diff-head"><span className={`side-label side-${side.toLowerCase()}`}>{side}</span><select value={version.id} onChange={(e) => setter(e.target.value)}>{active.versions.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></div>
-                    <pre>{version.content.split("\n").map((line, index) => <span key={index} className={(side === "A" ? versionB : versionA)?.content.split("\n")[index] !== line ? "changed" : ""}><i>{index + 1}</i>{line || " "}</span>)}</pre>
-                  </div>
-                ))}
-              </div>
+              {selectedPrompt.versions.length < 2 ? (
+                <div className="compare-empty"><ArrowsLeftRight size={22} /><h3>Cần ít nhất 2 version</h3><p>Lưu thêm một version sau khi chỉnh draft để bắt đầu so sánh.</p></div>
+              ) : <>
+                <div className="compare-summary"><div><ArrowsLeftRight size={18} /><strong>{changedLines} dòng thay đổi</strong><span>So sánh nội dung giữa hai version</span></div><button className="button ghost" onClick={() => { const temp = compareA; setCompareA(compareB); setCompareB(temp); }}><ArrowClockwise size={16} /> Đổi bên</button></div>
+                <div className="diff-grid">
+                  {[{ side: "A", version: versionA, setter: setCompareA }, { side: "B", version: versionB, setter: setCompareB }].map(({ side, version, setter }) => (
+                    <div className="diff-card" key={side}>
+                      <div className="diff-head"><span className={`side-label side-${side.toLowerCase()}`}>{side}</span><select value={version.id} onChange={(e) => setter(e.target.value)}>{selectedPrompt.versions.map((candidate, index) => <option key={candidate.id} value={candidate.id}>v{index + 1}{index === selectedPrompt.versions.length - 1 ? " — Latest" : ""}</option>)}</select></div>
+                      <pre>{version.content.split("\n").map((line, index) => <span key={index} className={`diff-line ${(side === "A" ? versionB : versionA)?.content.split("\n")[index] !== line ? "changed" : ""}`}><i className="diff-line-number">{index + 1}</i><code className="diff-line-content">{line || " "}</code></span>)}</pre>
+                    </div>
+                  ))}
+                </div>
+              </>}
             </div>
           )}
           </>}

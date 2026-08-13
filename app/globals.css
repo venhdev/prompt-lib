@@ -84,6 +84,7 @@ button { color: inherit; }
 .privacy-pill { gap: 6px; font-size: 12px; border: 1px solid var(--line-strong); background: var(--surface-hover); padding: 7px 10px; border-radius: 999px; color: var(--ink); }
 .button { border: 0; cursor: pointer; justify-content: center; gap: 7px; height: 38px; padding: 0 14px; border-radius: 8px; font-weight: 700; font-size: 13px; transition: .18s ease; }
 .button:hover { transform: translateY(-1px); }
+.button:disabled { cursor: not-allowed; opacity: .5; transform: none; box-shadow: none; }
 .button.primary { background: var(--accent); color: var(--on-accent); box-shadow: var(--shadow-button); }
 .button.dark { background: var(--ink); color: var(--canvas); }
 .button.ghost { border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
@@ -133,6 +134,7 @@ button { color: inherit; }
 .card-toolbar { height: 47px; padding: 0 13px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); background: var(--panel-raised); }
 .version-select { font-size: 12px; font-weight: 700; }
 .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-right: 7px; box-shadow: 0 0 0 3px var(--green-soft); }
+.status-dot.dirty { background: var(--amber); box-shadow: 0 0 0 3px var(--amber-soft); }
 .muted { color: var(--subtle); font-weight: 500; margin-left: 4px; }
 .toolbar-right { gap: 12px; color: var(--subtle); font: 400 11px DM Mono, monospace; }
 .tiny-button { display: flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: var(--panel-raised); height: 29px; border-radius: 6px; padding: 0 9px; font-size: 11px; cursor: pointer; }
@@ -149,7 +151,15 @@ button { color: inherit; }
 .version-item strong { font-size: 12px; }
 .version-item span { color: var(--muted); font-size: 11px; line-height: 1.35; }
 .version-item small { color: var(--subtle); font: 400 10px DM Mono, monospace; }
+.latest-badge { display: inline-flex; margin-left: 6px; padding: 2px 5px; border-radius: 4px; background: var(--accent-soft); color: var(--accent) !important; font-size: 9px !important; text-transform: uppercase; letter-spacing: .04em; }
+.timeline-empty { display: flex; flex-direction: column; gap: 5px; padding: 3px 3px 12px; }
+.timeline-empty strong { font-size: 12px; }
+.timeline-empty span { color: var(--muted); font-size: 11px; line-height: 1.5; }
 .compare-view { padding-top: 18px; }
+.compare-empty { min-height: 360px; display: grid; place-content: center; justify-items: center; padding: 24px; text-align: center; border: 1px dashed var(--line-strong); border-radius: 11px; background: var(--panel); }
+.compare-empty svg { color: var(--accent); }
+.compare-empty h3 { margin: 12px 0 0; font-size: 17px; }
+.compare-empty p { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .compare-summary { display: flex; align-items: center; justify-content: space-between; margin-bottom: 11px; }
 .compare-summary > div { gap: 8px; }
 .compare-summary strong { font-size: 13px; }
@@ -160,10 +170,11 @@ button { color: inherit; }
 .side-a { background: var(--red-soft); color: var(--red); }
 .side-b { background: var(--green-soft); color: var(--green); }
 .diff-head select { flex: 1; height: 30px; border: 1px solid var(--line); background: var(--panel-raised); color: var(--ink); border-radius: 6px; padding: 0 8px; font-size: 12px; outline: 0; }
-.diff-card pre { margin: 0; min-height: 485px; padding: 14px 0; overflow: auto; font: 400 12px/1.7 DM Mono, monospace; white-space: pre-wrap; }
-.diff-card pre span { display: block; min-height: 17px; padding: 0 14px 0 0; }
-.diff-card pre span.changed { background: var(--amber-soft); }
-.diff-card pre i { display: inline-block; width: 34px; margin-right: 10px; text-align: right; color: var(--subtle); font-style: normal; user-select: none; }
+.diff-card pre { margin: 0; min-height: 485px; padding: 14px 0; overflow: auto; font: 400 12px/1.7 DM Mono, monospace; white-space: normal; }
+.diff-line { display: grid; grid-template-columns: 44px minmax(0, 1fr); min-height: 20px; }
+.diff-line.changed { background: var(--amber-soft); }
+.diff-line-number { padding-right: 10px; text-align: right; color: var(--subtle); font-style: normal; user-select: none; }
+.diff-line-content { min-width: 0; padding-right: 14px; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
 .mobile-only { display: none; }
 .empty-state { min-height: calc(100vh - 170px); display: grid; place-content: center; justify-items: center; text-align: center; }
 .empty-state .brand-mark { width: 44px; height: 44px; margin-bottom: 16px; }

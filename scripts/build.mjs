@@ -1,6 +1,6 @@
 import { build } from "esbuild";
 import { existsSync } from "node:fs";
-import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadEnvFile } from "node:process";
 
@@ -111,19 +111,8 @@ export default {
 
 await mkdir(path.join(outputDir, "client"), { recursive: true });
 await mkdir(path.join(outputDir, "server"), { recursive: true });
-await mkdir(path.join(outputDir, ".openai"), { recursive: true });
 
 await writeFile(path.join(outputDir, "client/index.html"), html);
 await writeFile(path.join(outputDir, "server/index.js"), workerSource);
-const hostingConfig = path.join(root, ".openai/hosting.json");
-try {
-  await access(hostingConfig);
-  await writeFile(
-    path.join(outputDir, ".openai/hosting.json"),
-    await readFile(hostingConfig),
-  );
-} catch {
-  // Vercel deployments do not include the ChatGPT Sites project metadata.
-}
 
 console.log(`Built Prompt Library (${Buffer.byteLength(html)} byte HTML payload).`);

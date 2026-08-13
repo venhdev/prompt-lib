@@ -4,14 +4,15 @@ A focused multi-user library for reusable AI prompts.
 
 The application is publicly accessible. Each user's prompts remain private by default through Supabase Row Level Security.
 
-Current version: `0.3.0`
+Current version: `0.4.0`
 
 ## Features
 
-- Create, edit, duplicate, and delete prompts.
-- Save immutable prompt versions.
+- Create, edit, duplicate, and safely delete prompts.
+- Auto-save one working draft per prompt.
+- Save immutable prompt snapshots as `v1`, `v2`, and later versions.
 - Compare any two versions line by line.
-- Search by prompt name or tag.
+- Search by prompt name or description.
 - Import and export JSON backups.
 - Email/password accounts with username profiles and Email OTP recovery.
 - Per-user cloud data isolation through Supabase Row Level Security.
@@ -39,4 +40,4 @@ The project is configured for Vercel using `vercel.json`.
 
 ## Database
 
-Run `supabase/schema.sql` once on a fresh Supabase project.
+Run `supabase/schema.sql` once on a fresh Supabase project. Version rows are insert-only snapshots; editable content lives in `prompts.draft_content`.
