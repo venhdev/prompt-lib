@@ -4,8 +4,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { getAppUrl, supabase } from "../lib/supabase";
 import packageJson from "../package.json";
 import {
+  MDXEditor,
+  headingsPlugin,
+  listsPlugin,
+  quotePlugin,
+  thematicBreakPlugin,
+  markdownShortcutPlugin,
+  diffSourcePlugin,
+  toolbarPlugin,
+  DiffSourceToggleWrapper,
+  UndoRedo,
+} from "@mdxeditor/editor";
+import "@mdxeditor/editor/style.css";
+import {
   ArrowClockwise,
   ArrowsLeftRight,
+  CaretDown,
   Check,
   CheckCircle,
   Clock,
@@ -33,6 +47,26 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const APP_VERSION = packageJson.version;
 const RECOVERY_INTENT_KEY = "prompt-lib:password-recovery";
 const THEME_KEY = "prompt-lib:theme";
+
+const MARKDOWN_PLUGINS = [
+  headingsPlugin(),
+  listsPlugin(),
+  quotePlugin(),
+  thematicBreakPlugin(),
+  markdownShortcutPlugin(),
+];
+
+const EDITOR_PLUGINS = [
+  ...MARKDOWN_PLUGINS,
+  diffSourcePlugin({ viewMode: "rich-text" }),
+  toolbarPlugin({
+    toolbarContents: () => (
+      <DiffSourceToggleWrapper>
+        <UndoRedo />
+      </DiffSourceToggleWrapper>
+    ),
+  }),
+];
 
 function newId() {
   return crypto.randomUUID();
@@ -101,6 +135,9 @@ export default function PromptLibrary() {
   const [selectedPromptId, setSelectedPromptId] = useState(null);
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState("editor");
+  const [isEditing, setIsEditing] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
   const [compareA, setCompareA] = useState(null);
   const [compareB, setCompareB] = useState(null);
   const [notice, setNotice] = useState("Đã tự động lưu");
@@ -125,6 +162,8 @@ export default function PromptLibrary() {
   const syncQueueRef = useRef(Promise.resolve());
 
   const emailVerified = Boolean(session?.user?.email_confirmed_at);
+  const username = session?.user?.user_metadata?.username || session?.user?.email?.split("@")[0] || "User";
+  const userInitial = username.slice(0, 1).toUpperCase();
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -218,6 +257,11 @@ export default function PromptLibrary() {
   }, [session?.user?.id, emailVerified, recoveryMode, loadAttempt]);
 
   useEffect(() => {
+    setIsEditing(false);
+    setAccountMenuOpen(false);
+  }, [selectedPromptId]);
+
+  useEffect(() => {
     const timer = setTimeout(() => {
       if (!cloudReady || !session?.user || !emailVerified || recoveryMode || loadedUserId !== session.user.id) return;
       const userId = session.user.id;
@@ -275,6 +319,16 @@ export default function PromptLibrary() {
     setAuthMode("login");
     setLoginNotice("");
     if (session) await supabase.auth.signOut();
+  }
+
+  function requestLogout() {
+    setAccountMenuOpen(false);
+    setConfirmLogout(true);
+  }
+
+  async function confirmSignOut() {
+    setConfirmLogout(false);
+    await supabase.auth.signOut();
   }
 
   async function resendVerification() {
@@ -375,7 +429,7 @@ export default function PromptLibrary() {
   }, [selectedPromptId, selectedPrompt?.versions.length]);
 
   function updateDraft(content) {
-    if (!selectedPrompt) return;
+    if (!selectedPrompt || !isEditing) return;
     setNotice("Đang lưu…");
     setPrompts((items) => items.map((prompt) => prompt.id !== selectedPrompt.id ? prompt : {
       ...prompt,
@@ -385,7 +439,7 @@ export default function PromptLibrary() {
   }
 
   function updatePromptDetails(fields) {
-    if (!selectedPrompt) return;
+    if (!selectedPrompt || !isEditing) return;
     setNotice("Đang lưu…");
     setPrompts((items) => items.map((prompt) => prompt.id === selectedPrompt.id
       ? { ...prompt, ...fields, updatedAt: new Date().toISOString() }
@@ -405,6 +459,7 @@ export default function PromptLibrary() {
     setPrompts((items) => [prompt, ...items]);
     setSelectedPromptId(id);
     setTab("editor");
+    setIsEditing(true);
     setSidebarOpen(false);
     setNotice("Draft mới đã tạo");
   }
@@ -550,7 +605,7 @@ export default function PromptLibrary() {
           <h1>Không thể tải dữ liệu</h1>
           <p>Kết nối tới thư viện cloud thất bại. App chưa ghi hoặc thay đổi dữ liệu nào.</p>
           <button className="button primary auth-button" onClick={() => setLoadAttempt((value) => value + 1)}>Thử lại</button>
-          <div className="auth-switch"><button onClick={() => supabase.auth.signOut()}>Đăng xuất</button></div>
+          <div className="auth-switch"><button onClick={() => { if (window.confirm("Đăng xuất khỏi Prompt Library?")) supabase.auth.signOut(); }}>Đăng xuất</button></div>
         </div>
       </main>
     );
@@ -573,8 +628,17 @@ export default function PromptLibrary() {
           <span className="save-state"><Check size={14} weight="bold" /> {notice}</span>
           <label className="button ghost file-button"><UploadSimple size={16} /> Import<input type="file" accept="application/json" onChange={importData} /></label>
           <button className="button ghost" onClick={exportData}><DownloadSimple size={16} /> Export</button>
-          <div className="privacy-pill"><LockKey size={14} weight="fill" /> Chỉ mình bạn</div>
-          <button className="icon-button top-signout" onClick={() => supabase.auth.signOut()} title="Đăng xuất"><SignOut size={16} /></button>
+          <div className="account-menu">
+            <button className="account-trigger" onClick={() => setAccountMenuOpen((open) => !open)} aria-expanded={accountMenuOpen} aria-label="Mở menu tài khoản">
+              <span className="account-avatar">{userInitial}</span>
+              <span className="account-copy"><strong>{username}</strong><small>{session.user.email}</small></span>
+              <CaretDown size={15} />
+            </button>
+            {accountMenuOpen && <div className="account-dropdown">
+              <div className="account-dropdown-user"><strong>{username}</strong><span>{session.user.email}</span></div>
+              <button onClick={requestLogout}><SignOut size={16} /> Đăng xuất</button>
+            </div>}
+          </div>
         </div>
       </header>
 
@@ -594,7 +658,6 @@ export default function PromptLibrary() {
             ))}
           </div>
           <div className="sidebar-footer">
-            <div className="sidebar-tip"><span className="tip-icon">⌘</span><div><strong>Mẹo nhanh</strong><span>Chọn Copy để dùng prompt ngay</span></div></div>
             <span className="app-version">Prompt Library · v{APP_VERSION}</span>
           </div>
         </aside>
@@ -610,14 +673,19 @@ export default function PromptLibrary() {
           ) : <>
           <div className="prompt-header">
             <div className="title-area">
-              <div className="eyebrow">PROMPT EDITOR</div>
-              <input className="title-input" value={selectedPrompt.title} onChange={(e) => updatePromptDetails({ title: e.target.value })} placeholder="Untitled prompt" aria-label="Tên prompt" />
-              <input className="description-input" value={selectedPrompt.description} onChange={(e) => updatePromptDetails({ description: e.target.value })} placeholder="Mô tả mục tiêu của prompt…" aria-label="Mô tả prompt" />
+              <div className="eyebrow">PROMPT / {isEditing ? "EDITING" : "READONLY"}</div>
+              {isEditing ? <>
+                <input className="title-input" value={selectedPrompt.title} onChange={(e) => updatePromptDetails({ title: e.target.value })} placeholder="Untitled prompt" aria-label="Tên prompt" />
+                <input className="description-input" value={selectedPrompt.description} onChange={(e) => updatePromptDetails({ description: e.target.value })} placeholder="Mô tả mục tiêu của prompt…" aria-label="Mô tả prompt" />
+              </> : <>
+                <h1 className="prompt-title-heading">{selectedPrompt.title || "Untitled prompt"}</h1>
+                <p className="prompt-description-text">{selectedPrompt.description || "Chưa có mô tả"}</p>
+              </>}
             </div>
             <div className="header-actions">
               <button className="icon-button" onClick={duplicatePrompt} title="Duplicate" aria-label="Nhân bản prompt"><Copy size={17} /></button>
               <button className="icon-button danger" onClick={deletePrompt} title="Delete" aria-label="Xóa prompt"><Trash size={17} /></button>
-              <button className="button dark" onClick={saveVersion} disabled={!canSaveVersion} title={!selectedPrompt.draftContent.trim() ? "Nhập nội dung trước khi lưu version" : saveVersionLabel}><GitBranch size={17} /> {saveVersionLabel}</button>
+              {isEditing ? <><button className="button ghost header-done" onClick={() => setIsEditing(false)}>Xong</button><button className="button dark" onClick={saveVersion} disabled={!canSaveVersion} title={!selectedPrompt.draftContent.trim() ? "Nhập nội dung trước khi lưu version" : saveVersionLabel}><GitBranch size={17} /> {saveVersionLabel}</button></> : <button className="button primary" onClick={() => setIsEditing(true)}><Key size={17} /> Chỉnh sửa</button>}
             </div>
           </div>
 
@@ -630,11 +698,11 @@ export default function PromptLibrary() {
             <div className="editor-layout">
               <div className="editor-card">
                 <div className="card-toolbar">
-                  <div className="version-select"><span className={`status-dot ${hasVersionChanges ? "dirty" : ""}`} />Working draft<span className="muted">• {hasVersionChanges ? "Có thay đổi mới" : latestVersion ? `Khớp v${selectedPrompt.versions.length}` : "Chưa có version"}</span></div>
+                  <div className="version-select"><span className={`status-dot ${hasVersionChanges ? "dirty" : ""}`} />{isEditing ? "Working draft" : "Readonly view"}<span className="muted">• {hasVersionChanges ? "Có thay đổi mới" : latestVersion ? `Khớp v${selectedPrompt.versions.length}` : "Chưa có version"}</span></div>
                   <div className="toolbar-right"><span>{selectedPrompt.draftContent.length} chars</span><button className="tiny-button" onClick={() => navigator.clipboard.writeText(selectedPrompt.draftContent)}><Copy size={14} /> Copy</button></div>
                 </div>
-                <textarea className="prompt-editor" value={selectedPrompt.draftContent} onChange={(e) => updateDraft(e.target.value)} placeholder="Describe the role, goal, constraints, and expected output…" spellCheck="false" aria-label="Nội dung working draft" />
-                <div className="editor-footer"><span><CheckCircle size={15} weight="fill" /> Draft đã tự động lưu</span><span>Plain text · UTF-8</span></div>
+                {isEditing ? <MDXEditor key={`edit-${selectedPrompt.id}`} markdown={selectedPrompt.draftContent} onChange={updateDraft} plugins={EDITOR_PLUGINS} aria-label="Markdown prompt editor" /> : <MDXEditor key={`view-${selectedPrompt.id}`} markdown={selectedPrompt.draftContent || "_Chưa có nội dung._"} plugins={MARKDOWN_PLUGINS} readOnly aria-label="Readonly prompt preview" />}
+                <div className="editor-footer"><span><CheckCircle size={15} weight="fill" /> {isEditing ? "Draft đã tự động lưu" : "Readonly · Chưa chỉnh sửa"}</span><span>{isEditing ? "Markdown · MDXEditor" : "Markdown preview"}</span></div>
               </div>
               <aside className="version-rail">
                 <div className="rail-title"><span>Version history</span><Clock size={16} /></div>
@@ -675,6 +743,13 @@ export default function PromptLibrary() {
           </>}
         </section>
       </div>
+      {confirmLogout && <div className="dialog-backdrop" role="presentation">
+        <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="logout-dialog-title">
+          <h2 id="logout-dialog-title">Đăng xuất?</h2>
+          <p>Phiên làm việc hiện tại sẽ được đóng trên thiết bị này.</p>
+          <div className="dialog-actions"><button className="button ghost" onClick={() => setConfirmLogout(false)}>Hủy</button><button className="button primary" onClick={confirmSignOut}>Đăng xuất</button></div>
+        </section>
+      </div>}
     </main>
   );
 }

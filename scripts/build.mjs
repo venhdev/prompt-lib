@@ -79,40 +79,8 @@ const html = `<!doctype html>
   </body>
 </html>`;
 
-const workerSource = `const html = ${JSON.stringify(html)};
-
-export default {
-  async fetch(request) {
-    const url = new URL(request.url);
-
-    if (url.pathname === "/favicon.ico") {
-      return new Response(null, { status: 204 });
-    }
-
-    if (url.pathname !== "/" && url.pathname !== "/index.html") {
-      return new Response("Not found", {
-        status: 404,
-        headers: { "content-type": "text/plain; charset=utf-8" },
-      });
-    }
-
-    return new Response(html, {
-      status: 200,
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "private, no-store",
-        "x-content-type-options": "nosniff",
-        "referrer-policy": "same-origin",
-      },
-    });
-  },
-};
-`;
-
 await mkdir(path.join(outputDir, "client"), { recursive: true });
-await mkdir(path.join(outputDir, "server"), { recursive: true });
 
 await writeFile(path.join(outputDir, "client/index.html"), html);
-await writeFile(path.join(outputDir, "server/index.js"), workerSource);
 
 console.log(`Built Prompt Library (${Buffer.byteLength(html)} byte HTML payload).`);

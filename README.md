@@ -4,11 +4,13 @@ A focused multi-user library for reusable AI prompts.
 
 The application is publicly accessible. Each user's prompts remain private by default through Supabase Row Level Security.
 
-Current version: `0.4.0`
+Current version: `0.5.0`
 
 ## Features
 
 - Create, edit, duplicate, and safely delete prompts.
+- Readonly preview by default, with an explicit guarded edit flow.
+- Edit Markdown with MDXEditor in rich Markdown or Raw source mode.
 - Auto-save one working draft per prompt.
 - Save immutable prompt snapshots as `v1`, `v2`, and later versions.
 - Compare any two versions line by line.
@@ -17,6 +19,7 @@ Current version: `0.4.0`
 - Email/password accounts with username profiles and Email OTP recovery.
 - Per-user cloud data isolation through Supabase Row Level Security.
 - Dark theme by default with a persisted Light theme option.
+- MIT licensed by venhdev.
 
 ## Development
 
