@@ -137,6 +137,8 @@ export default function PromptLibrary() {
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState("editor");
   const [isEditing, setIsEditing] = useState(false);
+  const [confirmDuplicate, setConfirmDuplicate] = useState(false);
+  const [pendingPromptId, setPendingPromptId] = useState(null);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [compareA, setCompareA] = useState(null);
@@ -160,6 +162,7 @@ export default function PromptLibrary() {
   const [authForm, setAuthForm] = useState({ username: "", email: "", password: "", otp: "", newPassword: "" });
   const activeUserIdRef = useRef(null);
   const editorRef = useRef(null);
+  const editSnapshotRef = useRef(null);
   const persistedVersionIdsRef = useRef(new Set());
   const syncQueueRef = useRef(Promise.resolve());
 
@@ -259,7 +262,6 @@ export default function PromptLibrary() {
   }, [session?.user?.id, emailVerified, recoveryMode, loadAttempt]);
 
   useEffect(() => {
-    setIsEditing(false);
     setAccountMenuOpen(false);
   }, [selectedPromptId]);
 
@@ -420,9 +422,14 @@ export default function PromptLibrary() {
   const latestVersion = selectedPrompt?.versions?.at(-1) || null;
   const filtered = prompts.filter((prompt) => `${prompt.title} ${prompt.description}`.toLowerCase().includes(query.toLowerCase()));
   const hasVersionChanges = Boolean(selectedPrompt && selectedPrompt.draftContent !== latestVersion?.content);
-  const canSaveVersion = Boolean(selectedPrompt?.draftContent.trim() && hasVersionChanges);
+  const hasEditChanges = Boolean(isEditing && selectedPrompt && editSnapshotRef.current && (
+    selectedPrompt.title !== editSnapshotRef.current.title
+    || selectedPrompt.description !== editSnapshotRef.current.description
+    || selectedPrompt.draftContent !== editSnapshotRef.current.draftContent
+  ));
+  const canSaveVersion = Boolean(selectedPrompt?.draftContent.trim() && hasEditChanges);
   const nextVersionNumber = (selectedPrompt?.versions.length || 0) + 1;
-  const saveVersionLabel = latestVersion && !hasVersionChanges ? "Không có thay đổi" : `Lưu thành v${nextVersionNumber}`;
+  const saveVersionLabel = `Lưu thành v${nextVersionNumber}`;
 
   useEffect(() => {
     if (!selectedPrompt) return;
@@ -469,6 +476,14 @@ export default function PromptLibrary() {
   }
 
   function createPrompt() {
+    if (hasEditChanges) {
+      setPendingPromptId("__new__");
+      return;
+    }
+    createPromptNow();
+  }
+
+  function createPromptNow() {
     const id = newId();
     const prompt = {
       id,
@@ -481,14 +496,72 @@ export default function PromptLibrary() {
     setPrompts((items) => [prompt, ...items]);
     setSelectedPromptId(id);
     setTab("editor");
+    editSnapshotRef.current = {
+      title: prompt.title,
+      description: prompt.description,
+      draftContent: prompt.draftContent,
+      updatedAt: prompt.updatedAt,
+    };
     setIsEditing(true);
     setSidebarOpen(false);
     setNotice("Draft mới đã tạo");
   }
 
   function selectPrompt(id) {
+    if (id === selectedPrompt?.id) {
+      setSidebarOpen(false);
+      return;
+    }
+    if (hasEditChanges) {
+      setPendingPromptId(id);
+      return;
+    }
+    editSnapshotRef.current = null;
+    setIsEditing(false);
     setSelectedPromptId(id);
     setSidebarOpen(false);
+  }
+
+  function beginEditing() {
+    if (!selectedPrompt) return;
+    editSnapshotRef.current = {
+      title: selectedPrompt.title,
+      description: selectedPrompt.description,
+      draftContent: selectedPrompt.draftContent,
+      updatedAt: selectedPrompt.updatedAt,
+    };
+    setIsEditing(true);
+  }
+
+  function restoreEditSnapshot() {
+    if (!selectedPrompt || !editSnapshotRef.current) return;
+    const snapshot = editSnapshotRef.current;
+    setPrompts((items) => items.map((prompt) => prompt.id === selectedPrompt.id
+      ? { ...prompt, ...snapshot }
+      : prompt));
+  }
+
+  function cancelEditing() {
+    if (hasEditChanges) restoreEditSnapshot();
+    editSnapshotRef.current = null;
+    setIsEditing(false);
+    setNotice(hasEditChanges ? "Đã bỏ thay đổi" : "Đã hủy chỉnh sửa");
+  }
+
+  function confirmPromptNavigation() {
+    if (!pendingPromptId) return;
+    const nextPromptId = pendingPromptId;
+    restoreEditSnapshot();
+    editSnapshotRef.current = null;
+    setIsEditing(false);
+    setPendingPromptId(null);
+    if (nextPromptId === "__new__") {
+      createPromptNow();
+      return;
+    }
+    setSelectedPromptId(nextPromptId);
+    setSidebarOpen(false);
+    setNotice("Đã bỏ thay đổi");
   }
 
   function saveVersion() {
@@ -497,10 +570,17 @@ export default function PromptLibrary() {
     setPrompts((items) => items.map((prompt) => prompt.id === selectedPrompt.id
       ? { ...prompt, versions: [...prompt.versions, version], updatedAt: new Date().toISOString() }
       : prompt));
+    editSnapshotRef.current = null;
+    setIsEditing(false);
     setNotice(`Đã lưu v${nextVersionNumber}`);
   }
 
-  function duplicatePrompt() {
+  function requestDuplicatePrompt() {
+    if (!selectedPrompt) return;
+    setConfirmDuplicate(true);
+  }
+
+  function confirmDuplicatePrompt() {
     if (!selectedPrompt) return;
     const copy = {
       id: newId(),
@@ -510,8 +590,14 @@ export default function PromptLibrary() {
       updatedAt: new Date().toISOString(),
       versions: [],
     };
-    setPrompts((items) => [copy, ...items]);
+    const snapshot = editSnapshotRef.current;
+    setPrompts((items) => [copy, ...items.map((prompt) => prompt.id === selectedPrompt.id && hasEditChanges && snapshot
+      ? { ...prompt, ...snapshot }
+      : prompt)]);
     setSelectedPromptId(copy.id);
+    editSnapshotRef.current = null;
+    setIsEditing(false);
+    setConfirmDuplicate(false);
     setNotice("Đã nhân bản draft");
   }
 
@@ -519,6 +605,8 @@ export default function PromptLibrary() {
     if (!selectedPrompt || !window.confirm(`Xóa prompt “${selectedPrompt.title || "Untitled prompt"}”? Hành động này không thể hoàn tác.`)) return;
     const next = prompts.filter((prompt) => prompt.id !== selectedPrompt.id);
     setPrompts(next);
+    editSnapshotRef.current = null;
+    setIsEditing(false);
     setSelectedPromptId(next[0]?.id || null);
     setNotice("Đã xóa prompt");
   }
@@ -705,9 +793,9 @@ export default function PromptLibrary() {
               </>}
             </div>
             <div className="header-actions">
-              <button className="icon-button" onClick={duplicatePrompt} title="Duplicate" aria-label="Nhân bản prompt"><Copy size={17} /></button>
+              <button className="icon-button" onClick={requestDuplicatePrompt} title="Duplicate" aria-label="Nhân bản prompt"><Copy size={17} /></button>
               <button className="icon-button danger" onClick={deletePrompt} title="Delete" aria-label="Xóa prompt"><Trash size={17} /></button>
-              {isEditing ? <><button className="button ghost header-done" onClick={() => setIsEditing(false)}>Xong</button><button className="button dark" onClick={saveVersion} disabled={!canSaveVersion} title={!selectedPrompt.draftContent.trim() ? "Nhập nội dung trước khi lưu version" : saveVersionLabel}><GitBranch size={17} /> {saveVersionLabel}</button></> : <button className="button primary" onClick={() => setIsEditing(true)}><Key size={17} /> Chỉnh sửa</button>}
+              {isEditing ? <><button className="button ghost edit-cancel" onClick={cancelEditing}>{hasEditChanges ? "Bỏ thay đổi" : "Hủy"}</button><button className="button primary" onClick={saveVersion} disabled={!canSaveVersion} title={!selectedPrompt.draftContent.trim() ? "Nhập nội dung trước khi lưu version" : hasEditChanges ? saveVersionLabel : "Chưa có thay đổi"}><GitBranch size={17} /> {saveVersionLabel}</button></> : <button className="button primary" onClick={beginEditing}><Key size={17} /> Chỉnh sửa</button>}
             </div>
           </div>
 
@@ -770,6 +858,20 @@ export default function PromptLibrary() {
           <h2 id="logout-dialog-title">Đăng xuất?</h2>
           <p>Phiên làm việc hiện tại sẽ được đóng trên thiết bị này.</p>
           <div className="dialog-actions"><button className="button ghost" onClick={() => setConfirmLogout(false)}>Hủy</button><button className="button primary" onClick={confirmSignOut}>Đăng xuất</button></div>
+        </section>
+      </div>}
+      {confirmDuplicate && <div className="dialog-backdrop" role="presentation">
+        <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="duplicate-dialog-title">
+          <h2 id="duplicate-dialog-title">Nhân bản prompt?</h2>
+          <p>Một prompt mới sẽ được tạo từ nội dung hiện tại. Version history không được sao chép.</p>
+          <div className="dialog-actions"><button className="button ghost" onClick={() => setConfirmDuplicate(false)}>Hủy</button><button className="button primary" onClick={confirmDuplicatePrompt}>Nhân bản</button></div>
+        </section>
+      </div>}
+      {pendingPromptId && <div className="dialog-backdrop" role="presentation">
+        <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="navigation-dialog-title">
+          <h2 id="navigation-dialog-title">Bỏ thay đổi?</h2>
+          <p>Các chỉnh sửa chưa lưu thành version sẽ bị bỏ khi chuyển sang prompt khác.</p>
+          <div className="dialog-actions"><button className="button ghost" onClick={() => setPendingPromptId(null)}>Tiếp tục sửa</button><button className="button primary" onClick={confirmPromptNavigation}>Bỏ và chuyển</button></div>
         </section>
       </div>}
     </main>

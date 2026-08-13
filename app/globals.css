@@ -238,10 +238,8 @@ button { color: inherit; }
   .topbar { height: 58px; padding: 0 max(10px, env(safe-area-inset-right)) 0 max(10px, env(safe-area-inset-left)); }
   .brand { min-width: 0; }
   .brand > div:last-child, .topbar .button.ghost { display: none; }
-  .topbar .button.ghost.header-done { display: flex; }
   .top-actions { gap: 6px; }
-  .mobile-only { width: 42px; height: 42px; }
-  .mobile-only { display: grid; background: var(--surface-hover); border-color: var(--line-strong); color: var(--ink); }
+  .mobile-only { display: grid; width: 42px; height: 42px; background: var(--surface-hover); border-color: var(--line-strong); color: var(--ink); }
   .topbar .theme-toggle { width: 42px; height: 42px; }
   .account-trigger { min-height: 42px; padding-right: 6px; }
   .account-copy, .account-trigger > svg { display: none; }
