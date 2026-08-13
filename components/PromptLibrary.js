@@ -22,6 +22,7 @@ import {
   CaretDown,
   Check,
   CheckCircle,
+  ClipboardText,
   Clock,
   Copy,
   DownloadSimple,
@@ -158,6 +159,7 @@ export default function PromptLibrary() {
   });
   const [authForm, setAuthForm] = useState({ username: "", email: "", password: "", otp: "", newPassword: "" });
   const activeUserIdRef = useRef(null);
+  const editorRef = useRef(null);
   const persistedVersionIdsRef = useRef(new Set());
   const syncQueueRef = useRef(Promise.resolve());
 
@@ -446,6 +448,26 @@ export default function PromptLibrary() {
       : prompt));
   }
 
+  async function pasteMarkdown() {
+    if (!isEditing || !editorRef.current) return;
+    if (!navigator.clipboard?.readText) {
+      setNotice("Trình duyệt không cho phép đọc clipboard");
+      return;
+    }
+    try {
+      const markdown = await navigator.clipboard.readText();
+      if (!markdown) {
+        setNotice("Clipboard đang trống");
+        return;
+      }
+      editorRef.current.focus();
+      editorRef.current.insertMarkdown(markdown);
+      setNotice("Đã dán Markdown");
+    } catch {
+      setNotice("Không thể đọc clipboard");
+    }
+  }
+
   function createPrompt() {
     const id = newId();
     const prompt = {
@@ -699,9 +721,9 @@ export default function PromptLibrary() {
               <div className="editor-card">
                 <div className="card-toolbar">
                   <div className="version-select"><span className={`status-dot ${hasVersionChanges ? "dirty" : ""}`} />{isEditing ? "Working draft" : "Readonly view"}<span className="muted">• {hasVersionChanges ? "Có thay đổi mới" : latestVersion ? `Khớp v${selectedPrompt.versions.length}` : "Chưa có version"}</span></div>
-                  <div className="toolbar-right"><span>{selectedPrompt.draftContent.length} chars</span><button className="tiny-button" onClick={() => navigator.clipboard.writeText(selectedPrompt.draftContent)}><Copy size={14} /> Copy</button></div>
+                  <div className="toolbar-right"><span>{selectedPrompt.draftContent.length} chars</span>{isEditing && <button className="tiny-button" onClick={pasteMarkdown} title="Parse clipboard content as Markdown"><ClipboardText size={14} /> Paste Markdown</button>}<button className="tiny-button" onClick={() => navigator.clipboard.writeText(selectedPrompt.draftContent)}><Copy size={14} /> Copy</button></div>
                 </div>
-                {isEditing ? <MDXEditor key={`edit-${selectedPrompt.id}`} markdown={selectedPrompt.draftContent} onChange={updateDraft} plugins={EDITOR_PLUGINS} aria-label="Markdown prompt editor" /> : <MDXEditor key={`view-${selectedPrompt.id}`} markdown={selectedPrompt.draftContent || "_Chưa có nội dung._"} plugins={MARKDOWN_PLUGINS} readOnly aria-label="Readonly prompt preview" />}
+                {isEditing ? <MDXEditor ref={editorRef} key={`edit-${selectedPrompt.id}`} markdown={selectedPrompt.draftContent} onChange={updateDraft} plugins={EDITOR_PLUGINS} aria-label="Markdown prompt editor" /> : <MDXEditor ref={editorRef} key={`view-${selectedPrompt.id}`} markdown={selectedPrompt.draftContent || "_Chưa có nội dung._"} plugins={MARKDOWN_PLUGINS} readOnly aria-label="Readonly prompt preview" />}
                 <div className="editor-footer"><span><CheckCircle size={15} weight="fill" /> {isEditing ? "Draft đã tự động lưu" : "Readonly · Chưa chỉnh sửa"}</span><span>{isEditing ? "Markdown · MDXEditor" : "Markdown preview"}</span></div>
               </div>
               <aside className="version-rail">
