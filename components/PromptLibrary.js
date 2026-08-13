@@ -25,6 +25,7 @@ import {
   ClipboardText,
   Clock,
   Copy,
+  DotsThreeVertical,
   DownloadSimple,
   FolderSimple,
   GitBranch,
@@ -41,6 +42,7 @@ import {
   Sun,
   Trash,
   UploadSimple,
+  X,
 } from "@phosphor-icons/react";
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -48,6 +50,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const APP_VERSION = packageJson.version;
 const RECOVERY_INTENT_KEY = "prompt-lib:password-recovery";
 const THEME_KEY = "prompt-lib:theme";
+const LOCAL_DRAFT_KEY_PREFIX = "prompt-lib:local-draft:";
 
 const MARKDOWN_PLUGINS = [
   headingsPlugin(),
@@ -73,6 +76,28 @@ function newId() {
   return crypto.randomUUID();
 }
 
+function deriveTitle(markdown) {
+  const firstMeaningfulLine = String(markdown || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstMeaningfulLine) return "";
+  const title = firstMeaningfulLine
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/^[-*+]\s+/, "")
+    .replace(/^\d+[.)]\s+/, "")
+    .replace(/^>\s+/, "")
+    .replace(/[*_`~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!title) return "";
+  return title.length > 60 ? `${title.slice(0, 59).trimEnd()}…` : title;
+}
+
+function displayTitle(prompt) {
+  return prompt.title || deriveTitle(prompt.draftContent) || "Untitled prompt";
+}
+
 function normalizePrompts(items) {
   return items.map((prompt) => {
     const versions = (Array.isArray(prompt.versions) ? prompt.versions : []).map((version) => ({
@@ -83,10 +108,12 @@ function normalizePrompts(items) {
     return {
       id: prompt.id,
       title: typeof prompt.title === "string" ? prompt.title : "",
+      titleAuto: false,
       description: typeof prompt.description === "string" ? prompt.description : "",
       draftContent: typeof prompt.draftContent === "string" ? prompt.draftContent : versions.at(-1)?.content || "",
       updatedAt: prompt.updatedAt || new Date().toISOString(),
       versions,
+      localOnly: false,
     };
   });
 }
@@ -138,7 +165,10 @@ export default function PromptLibrary() {
   const [tab, setTab] = useState("editor");
   const [isEditing, setIsEditing] = useState(false);
   const [confirmDuplicate, setConfirmDuplicate] = useState(false);
+  const [duplicateTargetId, setDuplicateTargetId] = useState(null);
   const [pendingPromptId, setPendingPromptId] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [compareA, setCompareA] = useState(null);
@@ -169,6 +199,7 @@ export default function PromptLibrary() {
   const emailVerified = Boolean(session?.user?.email_confirmed_at);
   const username = session?.user?.user_metadata?.username || session?.user?.email?.split("@")[0] || "User";
   const userInitial = username.slice(0, 1).toUpperCase();
+  const localDraftKey = session?.user?.id ? `${LOCAL_DRAFT_KEY_PREFIX}${session.user.id}` : null;
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -239,19 +270,66 @@ export default function PromptLibrary() {
         const cloudPrompts = data.map((prompt) => ({
           id: prompt.id,
           title: prompt.title,
+          titleAuto: false,
           description: prompt.description || "",
           draftContent: prompt.draft_content || "",
           updatedAt: prompt.updated_at,
+          localOnly: false,
           versions: [...(prompt.prompt_versions || [])]
             .sort((a, b) => a.position - b.position)
             .map((version) => ({ id: version.id, content: version.content, createdAt: version.created_at })),
         }));
+        let localDraft = null;
+        if (localDraftKey) {
+          try {
+            const storedDraft = JSON.parse(localStorage.getItem(localDraftKey) || "null");
+            if (storedDraft && !String(storedDraft.draftContent || "").trim()) {
+              localDraft = {
+                id: storedDraft.id || newId(),
+                title: "",
+                titleAuto: true,
+                description: typeof storedDraft.description === "string" ? storedDraft.description : "",
+                draftContent: "",
+                updatedAt: storedDraft.updatedAt || new Date().toISOString(),
+                versions: [],
+                localOnly: true,
+              };
+            } else if (storedDraft) {
+              localStorage.removeItem(localDraftKey);
+            }
+          } catch {
+            localStorage.removeItem(localDraftKey);
+          }
+        }
+        const loadedPrompts = localDraft ? [localDraft, ...cloudPrompts] : cloudPrompts;
         persistedVersionIdsRef.current = new Set(cloudPrompts.flatMap((prompt) => prompt.versions.map((version) => version.id)));
-        setPrompts(cloudPrompts);
-        setSelectedPromptId(cloudPrompts[0].id);
+        setPrompts(loadedPrompts);
+        setSelectedPromptId(loadedPrompts[0]?.id || null);
       } else {
-        setPrompts([]);
-        setSelectedPromptId(null);
+        let localDraft = null;
+        if (localDraftKey) {
+          try {
+            const storedDraft = JSON.parse(localStorage.getItem(localDraftKey) || "null");
+            if (storedDraft && !String(storedDraft.draftContent || "").trim()) {
+              localDraft = {
+                id: storedDraft.id || newId(),
+                title: "",
+                titleAuto: true,
+                description: typeof storedDraft.description === "string" ? storedDraft.description : "",
+                draftContent: "",
+                updatedAt: storedDraft.updatedAt || new Date().toISOString(),
+                versions: [],
+                localOnly: true,
+              };
+            } else if (storedDraft) {
+              localStorage.removeItem(localDraftKey);
+            }
+          } catch {
+            localStorage.removeItem(localDraftKey);
+          }
+        }
+        setPrompts(localDraft ? [localDraft] : []);
+        setSelectedPromptId(localDraft?.id || null);
       }
       setLoadedUserId(session.user.id);
       setCloudReady(true);
@@ -259,17 +337,46 @@ export default function PromptLibrary() {
     }
     loadCloudLibrary();
     return () => { cancelled = true; };
-  }, [session?.user?.id, emailVerified, recoveryMode, loadAttempt]);
+  }, [session?.user?.id, emailVerified, recoveryMode, loadAttempt, localDraftKey]);
+
+  useEffect(() => {
+    if (!cloudReady || !localDraftKey) return;
+    const localDraft = prompts.find((prompt) => prompt.localOnly);
+    if (!localDraft) {
+      localStorage.removeItem(localDraftKey);
+      return;
+    }
+    localStorage.setItem(localDraftKey, JSON.stringify({
+      id: localDraft.id,
+      description: localDraft.description,
+      draftContent: localDraft.draftContent,
+      updatedAt: localDraft.updatedAt,
+    }));
+  }, [prompts, cloudReady, localDraftKey]);
 
   useEffect(() => {
     setAccountMenuOpen(false);
   }, [selectedPromptId]);
 
   useEffect(() => {
+    if (!contextMenu) return undefined;
+    const closeMenu = () => setContextMenu(null);
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") closeMenu();
+    };
+    document.addEventListener("click", closeMenu);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("click", closeMenu);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [contextMenu]);
+
+  useEffect(() => {
     const timer = setTimeout(() => {
       if (!cloudReady || !session?.user || !emailVerified || recoveryMode || loadedUserId !== session.user.id) return;
       const userId = session.user.id;
-      const snapshot = clone(prompts);
+      const snapshot = clone(prompts).filter((prompt) => !prompt.localOnly);
       const promptRows = snapshot.map((prompt) => ({
         id: prompt.id,
         owner_id: userId,
@@ -443,6 +550,8 @@ export default function PromptLibrary() {
     setPrompts((items) => items.map((prompt) => prompt.id !== selectedPrompt.id ? prompt : {
       ...prompt,
       draftContent: content,
+      title: prompt.titleAuto ? deriveTitle(content) : prompt.title,
+      localOnly: prompt.localOnly && !content.trim(),
       updatedAt: new Date().toISOString(),
     }));
   }
@@ -451,7 +560,7 @@ export default function PromptLibrary() {
     if (!selectedPrompt || !isEditing) return;
     setNotice("Đang lưu…");
     setPrompts((items) => items.map((prompt) => prompt.id === selectedPrompt.id
-      ? { ...prompt, ...fields, updatedAt: new Date().toISOString() }
+      ? { ...prompt, ...fields, titleAuto: Object.hasOwn(fields, "title") ? false : prompt.titleAuto, updatedAt: new Date().toISOString() }
       : prompt));
   }
 
@@ -484,23 +593,44 @@ export default function PromptLibrary() {
   }
 
   function createPromptNow() {
+    const existingLocalDraft = prompts.find((prompt) => prompt.localOnly);
+    if (existingLocalDraft) {
+      setSelectedPromptId(existingLocalDraft.id);
+      setTab("editor");
+      editSnapshotRef.current = {
+        title: existingLocalDraft.title,
+        titleAuto: existingLocalDraft.titleAuto,
+        description: existingLocalDraft.description,
+        draftContent: existingLocalDraft.draftContent,
+        updatedAt: existingLocalDraft.updatedAt,
+        localOnly: existingLocalDraft.localOnly,
+      };
+      setIsEditing(true);
+      setSidebarOpen(false);
+      setNotice("Đang mở draft trống");
+      return;
+    }
     const id = newId();
     const prompt = {
       id,
       title: "",
+      titleAuto: true,
       description: "",
       draftContent: "",
       updatedAt: new Date().toISOString(),
       versions: [],
+      localOnly: true,
     };
     setPrompts((items) => [prompt, ...items]);
     setSelectedPromptId(id);
     setTab("editor");
     editSnapshotRef.current = {
       title: prompt.title,
+      titleAuto: prompt.titleAuto,
       description: prompt.description,
       draftContent: prompt.draftContent,
       updatedAt: prompt.updatedAt,
+      localOnly: prompt.localOnly,
     };
     setIsEditing(true);
     setSidebarOpen(false);
@@ -516,6 +646,8 @@ export default function PromptLibrary() {
       setPendingPromptId(id);
       return;
     }
+    setContextMenu(null);
+    setDeleteConfirmId(null);
     editSnapshotRef.current = null;
     setIsEditing(false);
     setSelectedPromptId(id);
@@ -526,9 +658,11 @@ export default function PromptLibrary() {
     if (!selectedPrompt) return;
     editSnapshotRef.current = {
       title: selectedPrompt.title,
+      titleAuto: selectedPrompt.titleAuto,
       description: selectedPrompt.description,
       draftContent: selectedPrompt.draftContent,
       updatedAt: selectedPrompt.updatedAt,
+      localOnly: selectedPrompt.localOnly,
     };
     setIsEditing(true);
   }
@@ -555,6 +689,8 @@ export default function PromptLibrary() {
     editSnapshotRef.current = null;
     setIsEditing(false);
     setPendingPromptId(null);
+    setContextMenu(null);
+    setDeleteConfirmId(null);
     if (nextPromptId === "__new__") {
       createPromptNow();
       return;
@@ -575,30 +711,88 @@ export default function PromptLibrary() {
     setNotice(`Đã lưu v${nextVersionNumber}`);
   }
 
-  function requestDuplicatePrompt() {
-    if (!selectedPrompt) return;
+  function requestDuplicatePrompt(prompt = selectedPrompt) {
+    if (!prompt || prompt.localOnly || !prompt.draftContent.trim()) return;
+    setContextMenu(null);
+    setDuplicateTargetId(prompt.id);
     setConfirmDuplicate(true);
   }
 
   function confirmDuplicatePrompt() {
-    if (!selectedPrompt) return;
+    const target = prompts.find((prompt) => prompt.id === duplicateTargetId);
+    if (!target || target.localOnly || !target.draftContent.trim()) return;
     const copy = {
       id: newId(),
-      title: `${selectedPrompt.title || "Untitled prompt"} copy`,
-      description: selectedPrompt.description,
-      draftContent: selectedPrompt.draftContent,
+      title: `${displayTitle(target)} copy`,
+      titleAuto: false,
+      description: target.description,
+      draftContent: target.draftContent,
       updatedAt: new Date().toISOString(),
       versions: [],
+      localOnly: false,
     };
-    const snapshot = editSnapshotRef.current;
-    setPrompts((items) => [copy, ...items.map((prompt) => prompt.id === selectedPrompt.id && hasEditChanges && snapshot
-      ? { ...prompt, ...snapshot }
-      : prompt)]);
+    setPrompts((items) => [copy, ...items]);
     setSelectedPromptId(copy.id);
+    setTab("editor");
     editSnapshotRef.current = null;
     setIsEditing(false);
     setConfirmDuplicate(false);
+    setDuplicateTargetId(null);
     setNotice("Đã nhân bản draft");
+  }
+
+  async function copyLatestVersion(prompt) {
+    const latest = prompt?.versions?.at(-1);
+    setContextMenu(null);
+    if (!latest) {
+      setNotice("Prompt chưa có version");
+      return;
+    }
+    if (!navigator.clipboard?.writeText) {
+      setNotice("Trình duyệt không cho phép copy");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(latest.content);
+      setNotice(`Đã copy v${prompt.versions.length}`);
+    } catch {
+      setNotice("Không thể copy vào clipboard");
+    }
+  }
+
+  function openPromptMenu(event, promptId) {
+    event.preventDefault();
+    event.stopPropagation();
+    const point = event.currentTarget?.getBoundingClientRect
+      ? event.currentTarget.getBoundingClientRect()
+      : { right: event.clientX, bottom: event.clientY };
+    const x = event.clientX || point.right;
+    const y = event.clientY || point.bottom;
+    setContextMenu({ promptId, x: Math.min(x, window.innerWidth - 220), y: Math.min(y, window.innerHeight - 170) });
+  }
+
+  function requestDeletePrompt(promptId) {
+    setContextMenu(null);
+    setDeleteConfirmId(promptId);
+  }
+
+  function cancelDeletePrompt() {
+    setDeleteConfirmId(null);
+  }
+
+  function confirmDeletePrompt(promptId) {
+    const target = prompts.find((prompt) => prompt.id === promptId);
+    if (!target) return;
+    const next = prompts.filter((prompt) => prompt.id !== promptId);
+    setPrompts(next);
+    setDeleteConfirmId(null);
+    if (selectedPromptId === promptId) {
+      editSnapshotRef.current = null;
+      setIsEditing(false);
+      setSelectedPromptId(next[0]?.id || null);
+      setTab("editor");
+    }
+    setNotice(`Đã xóa ${displayTitle(target)}`);
   }
 
   function deletePrompt() {
@@ -760,13 +954,34 @@ export default function PromptLibrary() {
           <button className="button primary full" onClick={createPrompt}><Plus size={17} weight="bold" /> Prompt mới</button>
           <div className="prompt-list">
             {filtered.map((prompt) => (
-              <button key={prompt.id} className={`prompt-card ${prompt.id === selectedPrompt?.id ? "active" : ""}`} onClick={() => selectPrompt(prompt.id)}>
-                <div className="prompt-title"><FolderSimple size={17} weight={prompt.id === selectedPrompt?.id ? "fill" : "regular"} /><strong>{prompt.title || "Untitled prompt"}</strong></div>
-                <p>{prompt.description || "Chưa có mô tả"}</p>
-                <div className="card-meta"><span>{prompt.versions.length} versions</span><span>{formatRelativeTime(prompt.updatedAt)}</span></div>
-              </button>
+              <div
+                key={prompt.id}
+                className={`prompt-card ${prompt.id === selectedPrompt?.id ? "active" : ""} ${deleteConfirmId === prompt.id ? "deleting" : ""}`}
+                onContextMenu={(event) => openPromptMenu(event, prompt.id)}
+              >
+                {deleteConfirmId === prompt.id ? <div className="prompt-delete-confirm">
+                  <strong>Delete?</strong>
+                  <div><button className="prompt-inline-action cancel" onClick={cancelDeletePrompt} aria-label="Hủy xóa"><X size={16} /></button><button className="prompt-inline-action danger" onClick={() => confirmDeletePrompt(prompt.id)} aria-label="Xác nhận xóa"><Trash size={16} /></button></div>
+                </div> : <>
+                  <button className="prompt-card-main" onClick={() => selectPrompt(prompt.id)}>
+                    <div className="prompt-title"><FolderSimple size={17} weight={prompt.id === selectedPrompt?.id ? "fill" : "regular"} /><strong>{displayTitle(prompt)}</strong></div>
+                    <p>{prompt.description || (prompt.localOnly ? "Draft local · Chưa có nội dung" : "Chưa có mô tả")}</p>
+                    <div className="card-meta"><span>{prompt.localOnly ? "Draft local" : `${prompt.versions.length} versions`}</span><span>{formatRelativeTime(prompt.updatedAt)}</span></div>
+                  </button>
+                  <button className="prompt-menu-trigger" onClick={(event) => openPromptMenu(event, prompt.id)} aria-label={`Mở actions cho ${displayTitle(prompt)}`} title="Actions"><DotsThreeVertical size={18} /></button>
+                </>}
+              </div>
             ))}
           </div>
+          {contextMenu && (() => {
+            const prompt = prompts.find((item) => item.id === contextMenu.promptId);
+            if (!prompt) return null;
+            return <div className="prompt-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()} role="menu">
+              <button onClick={() => copyLatestVersion(prompt)} disabled={!prompt.versions.at(-1)} role="menuitem"><Copy size={16} /> Copy latest version</button>
+              <button onClick={() => requestDuplicatePrompt(prompt)} disabled={prompt.localOnly || !prompt.draftContent.trim()} role="menuitem"><Copy size={16} /> Duplicate</button>
+              <button className="danger" onClick={() => requestDeletePrompt(prompt.id)} role="menuitem"><Trash size={16} /> Delete</button>
+            </div>;
+          })()}
           <div className="sidebar-footer">
             <span className="app-version">Prompt Library · v{APP_VERSION}</span>
           </div>
@@ -785,15 +1000,15 @@ export default function PromptLibrary() {
             <div className="title-area">
               <div className="eyebrow">PROMPT / {isEditing ? "EDITING" : "READONLY"}</div>
               {isEditing ? <>
-                <input className="title-input" value={selectedPrompt.title} onChange={(e) => updatePromptDetails({ title: e.target.value })} placeholder="Untitled prompt" aria-label="Tên prompt" />
+                <input className="title-input" value={selectedPrompt.title || deriveTitle(selectedPrompt.draftContent)} onChange={(e) => updatePromptDetails({ title: e.target.value })} placeholder="Untitled prompt" aria-label="Tên prompt" />
                 <input className="description-input" value={selectedPrompt.description} onChange={(e) => updatePromptDetails({ description: e.target.value })} placeholder="Mô tả mục tiêu của prompt…" aria-label="Mô tả prompt" />
               </> : <>
-                <h1 className="prompt-title-heading">{selectedPrompt.title || "Untitled prompt"}</h1>
+                <h1 className="prompt-title-heading">{displayTitle(selectedPrompt)}</h1>
                 <p className="prompt-description-text">{selectedPrompt.description || "Chưa có mô tả"}</p>
               </>}
             </div>
             <div className="header-actions">
-              <button className="icon-button" onClick={requestDuplicatePrompt} title="Duplicate" aria-label="Nhân bản prompt"><Copy size={17} /></button>
+              <button className="icon-button" onClick={() => requestDuplicatePrompt(selectedPrompt)} disabled={!selectedPrompt.draftContent.trim()} title="Duplicate" aria-label="Nhân bản prompt"><Copy size={17} /></button>
               <button className="icon-button danger" onClick={deletePrompt} title="Delete" aria-label="Xóa prompt"><Trash size={17} /></button>
               {isEditing ? <><button className="button ghost edit-cancel" onClick={cancelEditing}>{hasEditChanges ? "Bỏ thay đổi" : "Hủy"}</button><button className="button primary" onClick={saveVersion} disabled={!canSaveVersion} title={!selectedPrompt.draftContent.trim() ? "Nhập nội dung trước khi lưu version" : hasEditChanges ? saveVersionLabel : "Chưa có thay đổi"}><GitBranch size={17} /> {saveVersionLabel}</button></> : <button className="button primary" onClick={beginEditing}><Key size={17} /> Chỉnh sửa</button>}
             </div>
@@ -864,7 +1079,7 @@ export default function PromptLibrary() {
         <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="duplicate-dialog-title">
           <h2 id="duplicate-dialog-title">Nhân bản prompt?</h2>
           <p>Một prompt mới sẽ được tạo từ nội dung hiện tại. Version history không được sao chép.</p>
-          <div className="dialog-actions"><button className="button ghost" onClick={() => setConfirmDuplicate(false)}>Hủy</button><button className="button primary" onClick={confirmDuplicatePrompt}>Nhân bản</button></div>
+          <div className="dialog-actions"><button className="button ghost" onClick={() => { setConfirmDuplicate(false); setDuplicateTargetId(null); }}>Hủy</button><button className="button primary" onClick={confirmDuplicatePrompt}>Nhân bản</button></div>
         </section>
       </div>}
       {pendingPromptId && <div className="dialog-backdrop" role="presentation">
